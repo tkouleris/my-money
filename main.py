@@ -5,6 +5,8 @@
     python main.py            # γραφική εφαρμογή
     python main.py --report   # αναφορά στο τερματικό (όλες οι τράπεζες)
     python main.py --report --bank eurobank
+    python main.py --report --year 2026
+    python main.py --report --year 2026 --month 09
     python main.py --lang en  # αγγλικά (αποθηκεύεται στο settings.json)
 """
 
@@ -13,7 +15,7 @@ import sys
 from pathlib import Path
 
 from mymoney import i18n
-from mymoney.i18n import bank_label, t
+from mymoney.i18n import bank_label, period_label, t
 
 BASE_DIR = Path(__file__).resolve().parent
 FILES_DIR = BASE_DIR / "files"
@@ -22,14 +24,13 @@ MANUAL_FILE = BASE_DIR / "manual_categories.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
 
-def print_report(month: str | None, bank: str | None):
+def print_report(year: str | None, month: str | None, bank: str | None):
     from mymoney.categories import Categorizer
     from mymoney.loader import load_banks, split_transfers
     from mymoney.stats import compute, fmt
 
     txs = load_banks(FILES_DIR)
-    if month:
-        txs = [tx for tx in txs if tx.month == month]
+    txs = [tx for tx in txs if tx.in_period(year, month)]
     categorizer = Categorizer.from_file(CATEGORIES_FILE, MANUAL_FILE)
     banks = sorted({tx.bank for tx in txs}, key=bank_label)
 
@@ -55,12 +56,18 @@ def print_report(month: str | None, bank: str | None):
         print()
     s = compute(txs, categorizer)
 
-    print(t("report.count", count=len(txs), bank=title, period=month or t("all_months")))
+    print(t("report.count", count=len(txs), bank=title, period=period_label(year, month)))
     print(f"{t('report.income'):<10}{fmt(s.income):>15}")
     print(f"{t('report.expenses'):<10}{fmt(s.expenses):>15}")
     print(f"{t('report.net'):<10}{fmt(s.net):>15}")
     print(f"{t('report.balance'):<10}{fmt(s.last_balance):>15}")
     print(t("report.avg_daily", amount=fmt(s.avg_daily_expense)))
+
+    print("\n" + t("report.years"))
+    for y in s.years:
+        print(f"  {y.year}     " + t("report.year_line", income=f"{fmt(y.income):>13}",
+                                     expenses=f"{fmt(y.expenses):>13}", net=f"{fmt(y.net):>13}",
+                                     avg=fmt(y.avg_monthly_expense)))
 
     print("\n" + t("report.months"))
     for m in s.months:
@@ -83,6 +90,7 @@ def main():
     parser = argparse.ArgumentParser(description=t("cli.description"))
     parser.add_argument("--report", action="store_true", help=t("cli.report"))
     parser.add_argument("--month", help=t("cli.month"))
+    parser.add_argument("--year", help=t("cli.year"))
     parser.add_argument("--bank", help=t("cli.bank"))
     parser.add_argument("--lang", choices=list(i18n.LANGUAGES), help=t("cli.lang"))
     args = parser.parse_args()
@@ -94,7 +102,14 @@ def main():
     if args.report:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
-        print_report(args.month, args.bank)
+        year, month = args.year, args.month
+        if month and "-" in month:  # παλιά μορφή 2026-09
+            year, month = month.split("-", 1)
+        if month:
+            if not month.isdigit() or not 1 <= int(month) <= 12:
+                sys.exit(t("report.bad_month", month=args.month))
+            month = f"{int(month):02d}"
+        print_report(year, month, args.bank)
         return
 
     from mymoney.gui import MyMoneyApp

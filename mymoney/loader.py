@@ -36,6 +36,15 @@ class Transaction:
     def month(self) -> str:
         return self.date.strftime("%Y-%m")
 
+    @property
+    def year(self) -> str:
+        return self.date.strftime("%Y")
+
+    def in_period(self, year: str | None = None, month: str | None = None) -> bool:
+        """year π.χ. «2026», month π.χ. «09»· None σημαίνει όλα."""
+        return ((year is None or self.date.strftime("%Y") == year)
+                and (month is None or self.date.strftime("%m") == month))
+
 
 def parse_amount(text: str) -> Decimal:
     """Μετατρέπει ελληνική μορφή αριθμού (1.786,63) σε Decimal."""

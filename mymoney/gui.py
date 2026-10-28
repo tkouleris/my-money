@@ -15,7 +15,7 @@ from matplotlib.figure import Figure  # noqa: E402
 
 from . import i18n  # noqa: E402
 from .categories import Categorizer  # noqa: E402
-from .i18n import bank_label, fmt_money, t  # noqa: E402
+from .i18n import bank_label, fmt_money, month_name, t  # noqa: E402
 from .loader import bank_folders, data_files, load_banks, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
 
@@ -192,6 +192,7 @@ class MyMoneyApp(tk.Tk):
 
         self.all_transactions = []
         self.banks: list[str] = []  # ονόματα φακέλων, ταξινομημένα κατά εμφανιζόμενο όνομα
+        self._months: list[str] = []  # μήνες («01».. «12») του φίλτρου μήνα
         self.stats: Stats | None = None
         self.bank_stats: dict[str, Stats] = {}
         self.transfers = []  # μεταφορές μεταξύ τραπεζών της τρέχουσας περιόδου
@@ -213,11 +214,17 @@ class MyMoneyApp(tk.Tk):
     def _build_toolbar(self):
         bar = ttk.Frame(self, padding=(12, 10))
         bar.pack(fill="x")
-        ttk.Label(bar, text=t("toolbar.period")).pack(side="left")
-        self.period_var = tk.StringVar(value=t("all_months"))
-        self.period_box = ttk.Combobox(bar, textvariable=self.period_var, state="readonly", width=18)
-        self.period_box.pack(side="left", padx=(6, 16))
-        self.period_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
+        ttk.Label(bar, text=t("toolbar.year")).pack(side="left")
+        self.year_var = tk.StringVar(value=t("all_years"))
+        self.year_box = ttk.Combobox(bar, textvariable=self.year_var, state="readonly", width=12)
+        self.year_box.pack(side="left", padx=(6, 16))
+        self.year_box.bind("<<ComboboxSelected>>", lambda _: self._on_year())
+
+        ttk.Label(bar, text=t("toolbar.month")).pack(side="left")
+        self.month_var = tk.StringVar(value=t("all_months"))
+        self.month_box = ttk.Combobox(bar, textvariable=self.month_var, state="readonly", width=14)
+        self.month_box.pack(side="left", padx=(6, 16))
+        self.month_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
         ttk.Label(bar, text=t("toolbar.bank")).pack(side="left")
         self.bank_var = tk.StringVar(value=t("all_banks"))
@@ -256,6 +263,20 @@ class MyMoneyApp(tk.Tk):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.notebook = nb
+
+        # Ανά έτος
+        tab = ttk.Frame(nb, padding=8)
+        nb.add(tab, text=t("tab.years"))
+        self.year_chart = ChartPanel(tab, height=3.6)
+        self.year_chart.pack(fill="both", expand=True)
+        frame, self.year_tree = make_tree(
+            tab, ["col.year", "col.income", "col.expenses", "col.net", "col.avg_monthly",
+                  "col.months", "col.transactions"],
+            [100, 140, 140, 140, 150, 70, 90], anchors={i: "e" for i in range(1, 7)},
+        )
+        frame.configure(height=150)
+        frame.pack_propagate(False)
+        frame.pack(fill="x", pady=(8, 0))
 
         # Ανά μήνα
         tab = ttk.Frame(nb, padding=8)
@@ -363,29 +384,47 @@ class MyMoneyApp(tk.Tk):
         if language == i18n.get_language():
             return
         # Κρατάμε τις επιλογές φίλτρων σε μορφή ανεξάρτητη από τη γλώσσα.
-        month = self._selected_month()
+        year, month = self._selected_year(), self._selected_month()
         bank = self._selected_bank()
         tab = self.notebook.index(self.notebook.select())
         i18n.set_language(language)
         if self.settings_file is not None:
             i18n.save_settings(self.settings_file)
         self._build_ui()
-        self._update_filters(month, bank)
+        self._update_filters(year, month, bank)
         self.refresh()
         self.notebook.select(tab)
 
     # ---------- δεδομένα ----------
 
+    def _selected_year(self) -> str | None:
+        """π.χ. «2026», ή None για όλα τα έτη."""
+        year = self.year_var.get()
+        return None if year == t("all_years") else year
+
     def _selected_month(self) -> str | None:
-        period = self.period_var.get()
-        return None if period == t("all_months") else period
+        """Αριθμός μήνα π.χ. «09», ή None για όλους τους μήνες."""
+        names = {month_name(m): m for m in self._months}
+        return names.get(self.month_var.get())
+
+    def _on_year(self):
+        self._update_months(self._selected_month())
+        self.refresh()
+
+    def _update_months(self, month: str | None):
+        """Μήνες με κινήσεις στο επιλεγμένο έτος (ή σε οποιοδήποτε έτος)."""
+        year = self._selected_year()
+        self._months = sorted({tx.date.strftime("%m") for tx in self.all_transactions
+                               if tx.in_period(year)})
+        self.month_box["values"] = [t("all_months"), *map(month_name, self._months)]
+        self.month_var.set(month_name(month) if month in self._months else t("all_months"))
 
     def _selected_bank(self) -> str | None:
         labels = {bank_label(b): b for b in self.banks}
         return labels.get(self.bank_var.get())
 
     def reload(self):
-        month, bank = self._selected_month(), self._selected_bank()
+        year, month, bank = self._selected_year(), self._selected_month(), self._selected_bank()
         try:
             self.all_transactions = load_banks(self.files_dir)
             self.categorizer = Categorizer.from_file(self.categories_file, self.manual_file)
@@ -393,24 +432,23 @@ class MyMoneyApp(tk.Tk):
             messagebox.showerror(t("msg.error"), t("msg.load_failed", error=exc))
             return
         self.banks = sorted({tx.bank for tx in self.all_transactions}, key=bank_label)
-        self._update_filters(month, bank)
+        self._update_filters(year, month, bank)
         self.refresh()
 
-    def _update_filters(self, month: str | None, bank: str | None):
+    def _update_filters(self, year: str | None, month: str | None, bank: str | None):
         files = sum(len(data_files(f)) for f in bank_folders(self.files_dir))
         self.status_var.set(t("status", banks=len(self.banks), files=files,
                               count=len(self.all_transactions)))
-        months = sorted({tx.month for tx in self.all_transactions}, reverse=True)
-        self.period_box["values"] = [t("all_months"), *months]
-        self.period_var.set(month if month in months else t("all_months"))
+        years = sorted({tx.year for tx in self.all_transactions}, reverse=True)
+        self.year_box["values"] = [t("all_years"), *years]
+        self.year_var.set(year if year in years else t("all_years"))
+        self._update_months(month)
         self.bank_box["values"] = [t("all_banks"), *map(bank_label, self.banks)]
         self.bank_var.set(bank_label(bank) if bank in self.banks else t("all_banks"))
 
     def refresh(self):
-        month = self._selected_month()
-        txs = self.all_transactions
-        if month:
-            txs = [tx for tx in txs if tx.month == month]
+        year, month = self._selected_year(), self._selected_month()
+        txs = [tx for tx in self.all_transactions if tx.in_period(year, month)]
         # Κάθε τράπεζα ξεχωριστά: οι μεταφορές προς/από άλλες τράπεζες μετράνε κανονικά.
         self.bank_stats = {
             bank: compute([tx for tx in txs if tx.bank == bank], self.categorizer)
@@ -422,6 +460,7 @@ class MyMoneyApp(tk.Tk):
         bank = self._selected_bank()
         self.stats = self.combined_stats if bank is None else self.bank_stats[bank]
         self._fill_cards()
+        self._fill_years()
         self._fill_months()
         self._fill_banks()
         self._fill_categories()
@@ -465,6 +504,19 @@ class MyMoneyApp(tk.Tk):
             ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=TEXT_MUTED)
             ax.set_title(title, loc="left", fontsize=11, color=TEXT)
         chart.draw()
+
+    def _fill_years(self):
+        s = self.stats
+        tree = self.year_tree
+        tree.delete(*tree.get_children())
+        for y in reversed(s.years):
+            tree.insert("", "end", values=(y.year, fmt(y.income), fmt(y.expenses), fmt(y.net),
+                                           fmt(y.avg_monthly_expense), len(y.months), y.count))
+        if len(s.years) > 1:
+            tree.insert("", "end", values=(t("total"), fmt(s.income), fmt(s.expenses), fmt(s.net),
+                                           "", len(s.months), len(s.transactions)), tags=("total",))
+        self._income_expense_chart(self.year_chart, [(y.year, y.income, y.expenses) for y in s.years],
+                                   t("chart.years"))
 
     def _fill_months(self):
         s = self.stats

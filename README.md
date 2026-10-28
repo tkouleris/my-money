@@ -7,7 +7,7 @@ Everything runs locally. Your bank files never leave your computer.
 ## Features
 
 - Income, expenses, net result, latest balance and average daily spending
-- Monthly income vs. expenses (chart + table)
+- Yearly and monthly income vs. expenses (chart + table), with average monthly spending per year
 - Per-bank comparison, with a combined total
 - Expenses by category, daily expenses, top merchants
 - Searchable transaction list with a bank and category filter
@@ -60,14 +60,15 @@ Double-click `run.bat`, or:
 .venv\Scripts\python main.py
 ```
 
-Use **Period** to pick a month and **Bank** to pick a single bank or all banks. After adding new files, press **Reload files** to reload them.
+Use **Year** and **Month** to narrow the period: a whole year, one month of a year, or the same month across all years (e.g. every September). The month list shows only months that have transactions in the selected year. Use **Bank** to pick a single bank or all banks. After adding new files, press **Reload files** to reload them.
 
 ### Terminal report
 
 ```bat
 .venv\Scripts\python main.py --report                    # all banks
 .venv\Scripts\python main.py --report --bank piraeus     # one bank (folder name or display name)
-.venv\Scripts\python main.py --report --month 2026-09    # one month
+.venv\Scripts\python main.py --report --year 2026 --month 09   # one month of a year
+.venv\Scripts\python main.py --report --year 2026               # one year
 ```
 
 ## Language

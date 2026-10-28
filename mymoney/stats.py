@@ -23,6 +23,23 @@ class MonthStats:
 
 
 @dataclass
+class YearStats:
+    year: str
+    income: Decimal = ZERO
+    expenses: Decimal = ZERO  # θετικός αριθμός
+    count: int = 0
+    months: set = field(default_factory=set)  # μήνες με κινήσεις
+
+    @property
+    def net(self) -> Decimal:
+        return self.income - self.expenses
+
+    @property
+    def avg_monthly_expense(self) -> Decimal:
+        return self.expenses / len(self.months) if self.months else ZERO
+
+
+@dataclass
 class CategoryStats:
     name: str
     total: Decimal = ZERO  # θετικός αριθμός
@@ -36,6 +53,7 @@ class Stats:
     income: Decimal = ZERO
     expenses: Decimal = ZERO
     months: list[MonthStats] = field(default_factory=list)
+    years: list[YearStats] = field(default_factory=list)
     expense_categories: list[CategoryStats] = field(default_factory=list)
     income_categories: list[CategoryStats] = field(default_factory=list)
     top_merchants: list[CategoryStats] = field(default_factory=list)
@@ -85,6 +103,7 @@ def compute(transactions: list[Transaction], categorizer: Categorizer) -> Stats:
     stats = Stats(transactions=transactions, categories=categories)
 
     months: dict[str, MonthStats] = {}
+    years: dict[str, YearStats] = {}
     exp_cats: dict[str, CategoryStats] = {}
     inc_cats: dict[str, CategoryStats] = {}
     merchants: dict[str, CategoryStats] = {}
@@ -92,10 +111,14 @@ def compute(transactions: list[Transaction], categorizer: Categorizer) -> Stats:
 
     for tx in transactions:
         m = months.setdefault(tx.month, MonthStats(tx.month))
+        y = years.setdefault(tx.year, YearStats(tx.year))
+        y.count += 1
+        y.months.add(tx.month)
         cat = categories[tx]
         if tx.is_income and categorizer.is_income_category(cat):
             stats.income += tx.amount
             m.income += tx.amount
+            y.income += tx.amount
             c = inc_cats.setdefault(cat, CategoryStats(cat))
             c.total += tx.amount
             c.count += 1
@@ -104,6 +127,7 @@ def compute(transactions: list[Transaction], categorizer: Categorizer) -> Stats:
             value = -tx.amount
             stats.expenses += value
             m.expenses += value
+            y.expenses += value
             c = exp_cats.setdefault(cat, CategoryStats(cat))
             c.total += value
             c.count += 1
@@ -113,6 +137,7 @@ def compute(transactions: list[Transaction], categorizer: Categorizer) -> Stats:
             daily[tx.date] += value
 
     stats.months = sorted(months.values(), key=lambda m: m.month)
+    stats.years = sorted(years.values(), key=lambda y: y.year)
     stats.expense_categories = _sorted_groups(exp_cats)
     stats.income_categories = _sorted_groups(inc_cats)
     stats.top_merchants = _sorted_groups(merchants)

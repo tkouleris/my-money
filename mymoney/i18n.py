@@ -20,7 +20,8 @@ STRINGS = {
 
     # Γραμμή εργαλείων
     "app.title": ("MyMoney — Έσοδα & Έξοδα", "MyMoney — Income & Expenses"),
-    "toolbar.period": ("Περίοδος:", "Period:"),
+    "toolbar.year": ("Έτος:", "Year:"),
+    "toolbar.month": ("Μήνας:", "Month:"),
     "toolbar.bank": ("Τράπεζα:", "Bank:"),
     "toolbar.language": ("Γλώσσα:", "Language:"),
     "toolbar.reload": ("⟳ Επαναφόρτωση αρχείων", "⟳ Reload files"),
@@ -28,7 +29,9 @@ STRINGS = {
     "toolbar.categories": ("✎ Κατηγορίες", "✎ Categories"),
     "status": ("{banks} τράπεζες · {files} αρχεία · {count} κινήσεις",
                "{banks} banks · {files} files · {count} transactions"),
+    "all_years": ("Όλα τα έτη", "All years"),
     "all_months": ("Όλοι οι μήνες", "All months"),
+    "all_time": ("Όλη η περίοδος", "All time"),
     "all_banks": ("Όλες οι τράπεζες", "All banks"),
     "all_categories": ("Όλες", "All"),
 
@@ -41,6 +44,7 @@ STRINGS = {
     "card.count": ("Κινήσεις", "Transactions"),
 
     # Καρτέλες
+    "tab.years": ("Ανά έτος", "By year"),
     "tab.months": ("Ανά μήνα", "By month"),
     "tab.banks": ("Ανά τράπεζα", "By bank"),
     "tab.categories": ("Κατηγορίες εξόδων", "Expense categories"),
@@ -49,7 +53,10 @@ STRINGS = {
     "tab.transactions": ("Κινήσεις", "Transactions"),
 
     # Στήλες πινάκων
+    "col.year": ("Έτος", "Year"),
     "col.month": ("Μήνας", "Month"),
+    "col.months": ("Μήνες", "Months"),
+    "col.avg_monthly": ("Μέσο έξοδο / μήνα", "Avg. expense / month"),
     "col.income": ("Έσοδα", "Income"),
     "col.expenses": ("Έξοδα", "Expenses"),
     "col.net": ("Καθαρό", "Net"),
@@ -89,6 +96,7 @@ STRINGS = {
     "tx.reset_category": ("Επαναφορά αυτόματης κατηγορίας", "Reset to automatic category"),
 
     # Γραφήματα
+    "chart.years": ("Έσοδα και έξοδα ανά έτος", "Income and expenses by year"),
     "chart.months": ("Έσοδα και έξοδα ανά μήνα", "Income and expenses by month"),
     "chart.banks": ("Έσοδα και έξοδα ανά τράπεζα", "Income and expenses by bank"),
     "chart.categories": ("Έξοδα ανά κατηγορία", "Expenses by category"),
@@ -126,7 +134,10 @@ STRINGS = {
     # Αναφορά τερματικού
     "cli.description": ("Στατιστικά εσόδων/εξόδων", "Income/expense statistics"),
     "cli.report": ("εκτύπωση αναφοράς αντί για παράθυρο", "print a report instead of opening the window"),
-    "cli.month": ("φίλτρο μήνα για την αναφορά, π.χ. 2026-09", "month filter for the report, e.g. 2026-09"),
+    "cli.month": ("φίλτρο μήνα, π.χ. 09 (με --year) ή 2026-09", "month filter, e.g. 09 (with --year) or 2026-09"),
+    "report.bad_month": ("Μη έγκυρος μήνας «{month}». Δώσε π.χ. 09 ή 2026-09.",
+                         "Invalid month “{month}”. Use e.g. 09 or 2026-09."),
+    "cli.year": ("φίλτρο έτους για την αναφορά, π.χ. 2026", "year filter for the report, e.g. 2026"),
     "cli.bank": ("μόνο μία τράπεζα, π.χ. eurobank ή nationalbank",
                  "a single bank, e.g. eurobank or nationalbank"),
     "cli.lang": ("γλώσσα (el ή en)· αποθηκεύεται για τις επόμενες φορές",
@@ -144,12 +155,34 @@ STRINGS = {
     "report.net": ("Καθαρό:", "Net:"),
     "report.balance": ("Υπόλοιπο:", "Balance:"),
     "report.avg_daily": ("Μέσο έξοδο/ημέρα: {amount}", "Avg. expense/day: {amount}"),
+    "report.years": ("Ανά έτος", "By year"),
+    "report.year_line": ("έσοδα {income}  έξοδα {expenses}  καθαρό {net}  μέσο έξοδο/μήνα {avg}",
+                         "income {income}  expenses {expenses}  net {net}  avg. expense/month {avg}"),
     "report.months": ("Ανά μήνα", "By month"),
     "report.month_line": ("έσοδα {income}  έξοδα {expenses}  καθαρό {net}",
                           "income {income}  expenses {expenses}  net {net}"),
     "report.categories": ("Έξοδα ανά κατηγορία", "Expenses by category"),
     "report.top": ("Top 10 έμποροι", "Top 10 merchants"),
 }
+
+
+MONTH_NAMES = {
+    "el": ("Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος",
+           "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"),
+    "en": ("January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December"),
+}
+
+
+def month_name(month: str) -> str:
+    """Όνομα μήνα από τον αριθμό του («09» -> «Σεπτέμβριος»)."""
+    return MONTH_NAMES[_language][int(month) - 1]
+
+
+def period_label(year: str | None, month: str | None) -> str:
+    """π.χ. «Σεπτέμβριος 2026», «2026», «Σεπτέμβριος» ή «Όλη η περίοδος»."""
+    parts = [month_name(month) if month else None, year]
+    return " ".join(p for p in parts if p) or t("all_time")
 
 
 def get_language() -> str:
