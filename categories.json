@@ -1,0 +1,24 @@
+{
+  "_οδηγίες": "Κάθε κατηγορία έχει λίστα από λέξεις-κλειδιά. Αν η περιγραφή μιας κίνησης περιέχει κάποια (χωρίς διάκριση πεζών/κεφαλαίων), μπαίνει σε αυτή την κατηγορία. Ελέγχονται με τη σειρά που εμφανίζονται. Θετικά ποσά σε κατηγορίες που ΔΕΝ είναι στο income_categories θεωρούνται επιστροφές χρημάτων και αφαιρούνται από τα έξοδα.",
+  "income_categories": ["Εισερχόμενα εμβάσματα", "Μισθός"],
+  "categories": {
+    "Μισθός": ["ΜΙΣΘΟΔΟΣΙΑ"],
+    "Προμήθειες τράπεζας": ["COM POI", "ΠΡΟΜΗΘΕΙΑ", "ΠΡΟΜΗΘ.", "ΕΞΟΔΑ ΤΗΡΗΣΗΣ"],
+    "Εισερχόμενα εμβάσματα": ["POI ", "ΕΙΣΕΡΧΟΜΕΝΟ ΕΜΒΑΣΜΑ"],
+    "Αναλήψεις ATM": ["ΑΝΑΛΗΨΗ ΜΕΤΡΗΤΩΝ", "ΑΤΜ NB", "ATM NB"],
+    "Delivery φαγητού": ["eΦooΔ", "EFOOD", "WOLT", "BOX "],
+    "Σούπερ μάρκετ": ["SKLAVENITIS", "ΣΚΛΑΒΕΝΙΤΗΣ", "AB VASSILOPOULOS", "LIDL", "MASOUTIS", "MY MARKET", "GALAXIAS", "KRITIKOS", "MINI MARKET", "ARTODENTRON", "EVEREST"],
+    "Καφές / Snacks": ["ENZYMO", "GIO GROUP", "CAFE", "CAFFE", "ESPRESSO", "BREW RATIO", "STARBU", "KIOSK", "MATESI", "MY HOOD"],
+    "Εστιατόρια": ["OUZERI", "GRILL", "GYRO", "ESTIASI", "ROOFGARDEN", "FOOD", "LADOKOLA"],
+    "Τυχερά παιχνίδια": ["ALLWYN", "OPAP", "ΟΠΑΠ"],
+    "Πληρωμές IRIS": ["IRIS"],
+    "Υγεία": ["ΓΙΑΤΡ", "AFFIDEA", "DOCTOR", "ΦΑΡΜΑΚ", "PHARM", "IATR"],
+    "Ενοίκιο": ["ENOIKIO", "ΕΝΟΙΚΙΟ"],
+    "Λογαριασμοί": ["COSMOTE", "VODAFONE", "NOVA", "WIND", "MYF2G", "DEI ", "ΔΕΗ", "Δ.Ε.Η", "TELEKOM", "EYDAP", "BEBAIVMENES OFEILES"],
+    "Μετακινήσεις / Καύσιμα": ["UBER", "OASA", "KTEL", "AVIN", "EKO ", "STAIKOS", "SHELL", "BP ", "CARMATES", "MOTOSAKO"],
+    "Ψυχαγωγία": ["VILLAGE CINEMAS", "VOLTA", "EUROLEAGUE", "HELLASMANIA", "BOOKING"],
+    "Συνδρομές / Software": ["OPENAI", "COURSERA", "JETBRAINS", "UDEMY", "NETFLIX", "SPOTIFY", "GOOGLE", "APPLE.COM"],
+    "Online αγορές": ["SKROUTZ", "SHEIN", "AMAZON", "PLAISIO", "PUBLIC", "IKEA", "MISTER PANTA", "PANTA TA OLA"],
+    "Μεταφορές σε λογαριασμούς": ["REVOLUT"]
+  }
+}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Προσωπικά δεδομένα: χειροκίνητες κατηγορίες κινήσεων
+# (οι εξαγωγές των τραπεζών εξαιρούνται από το files/.gitignore)
+manual_categories.json
+
+# Προσωρινά αρχεία Excel
+~$*
