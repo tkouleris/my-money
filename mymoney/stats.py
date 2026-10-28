@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .categories import Categorizer
+from .i18n import fmt_money
 from .loader import Transaction
 
 ZERO = Decimal("0")
@@ -120,8 +121,5 @@ def compute(transactions: list[Transaction], categorizer: Categorizer) -> Stats:
 
 
 def fmt(value: Decimal | None) -> str:
-    """Μορφοποίηση ποσού στα ελληνικά: 1.234,56 €"""
-    if value is None:
-        return "-"
-    s = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"{s} €"
+    """Μορφοποίηση ποσού στην τρέχουσα γλώσσα: 1.234,56 € ή €1,234.56"""
+    return fmt_money(value)

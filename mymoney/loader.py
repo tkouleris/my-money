@@ -15,6 +15,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .i18n import t
+
 
 @dataclass(frozen=True)
 class Transaction:
@@ -24,7 +26,7 @@ class Transaction:
     amount: Decimal
     balance: Decimal | None
     source: str
-    bank: str = ""
+    bank: str = ""  # όνομα φακέλου της τράπεζας, π.χ. «eurobank»
 
     @property
     def is_income(self) -> bool:
@@ -45,17 +47,7 @@ def parse_date(text: str) -> date:
     return datetime.strptime(text.strip(), "%d/%m/%Y").date()
 
 
-BANK_NAMES = {
-    "eurobank": "Eurobank",
-    "nationalbank": "Εθνική Τράπεζα",
-    "piraeus": "Πειραιώς",
-}
-
 SUPPORTED_SUFFIXES = (".csv", ".xlsx")
-
-
-def bank_name(folder: Path) -> str:
-    return BANK_NAMES.get(folder.name.casefold(), folder.name)
 
 
 def load_file(path: Path, bank: str = "") -> list[Transaction]:
@@ -145,7 +137,7 @@ def load_xlsx(path: Path, bank: str = "") -> list[Transaction]:
             parse = _nbg_row
             break
     else:
-        raise ValueError(f"{path.name}: άγνωστη μορφή αρχείου xlsx")
+        raise ValueError(t("error.unknown_xlsx", file=path.name))
 
     transactions = []
     for row in rows[i + 1:]:
@@ -253,7 +245,7 @@ def load_banks(files_dir: Path) -> list[Transaction]:
     """Κινήσεις όλων των τραπεζών (ένας υποφάκελος ανά τράπεζα), χρονολογικά."""
     result = []
     for folder in bank_folders(files_dir):
-        result.extend(load_folder(folder, bank_name(folder)))
+        result.extend(load_folder(folder, folder.name))
     result.sort(key=lambda t: t.date)
     return result
 

@@ -15,6 +15,7 @@ Everything runs locally. Your bank files never leave your computer.
 - Transfers between your own banks are detected and left out of the combined total, so they are not counted twice
 - Overlapping exports of the same bank are de-duplicated
 - A plain-text report for the terminal
+- Greek (default) and English interface
 
 ## Supported banks
 
@@ -59,7 +60,7 @@ Double-click `run.bat`, or:
 .venv\Scripts\python main.py
 ```
 
-Use **Περίοδος** to pick a month and **Τράπεζα** to pick a single bank or all banks. After adding new files, press **Επαναφόρτωση αρχείων** to reload them.
+Use **Period** to pick a month and **Bank** to pick a single bank or all banks. After adding new files, press **Reload files** to reload them.
 
 ### Terminal report
 
@@ -68,6 +69,18 @@ Use **Περίοδος** to pick a month and **Τράπεζα** to pick a single
 .venv\Scripts\python main.py --report --bank piraeus     # one bank (folder name or display name)
 .venv\Scripts\python main.py --report --month 2026-09    # one month
 ```
+
+## Language
+
+The interface is in Greek by default. To switch to English, pick **English** from the language list at the top right of the window. The window switches straight away and keeps your selected month, bank and tab. You can also switch from the command line:
+
+```bat
+.venv\Scripts\python main.py --lang en     # or --lang el
+```
+
+The choice is saved in `settings.json` and is used the next time the app starts, both in the window and in the terminal report. Amounts are shown as `1.234,56 €` in Greek and `€1,234.56` in English.
+
+Category names come from `categories.json` and your manual choices, so they stay as you wrote them in either language.
 
 ## Categories
 
@@ -88,7 +101,7 @@ When a debit in one bank matches a credit in another bank, the app treats the pa
 ## Adding another bank
 
 1. Create a folder under `files/` (e.g. `files/alphabank`) and put the exports there.
-2. Optionally give it a display name in `BANK_NAMES` in `mymoney/loader.py`.
+2. Optionally give it a display name in both languages by adding a `bank.<folder>` entry (e.g. `bank.alphabank`) to `STRINGS` in `mymoney/i18n.py`.
 3. If the export format is new, add a row parser next to `_nbg_row` / `_piraeus_row` in `mymoney/loader.py` and detect it by its column headers in `load_xlsx` (or add a CSV loader).
 
 ## Project structure
@@ -99,10 +112,12 @@ mymoney/loader.py        reading bank exports, de-duplication, inter-bank transf
 mymoney/categories.py    keyword and manual categorisation
 mymoney/stats.py         statistics
 mymoney/gui.py           Tkinter + matplotlib interface
+mymoney/i18n.py          Greek/English texts and amount formatting
 categories.json          category keyword rules
 manual_categories.json   your manual category choices (not committed)
+settings.json            your language choice (not committed)
 ```
 
 ## Privacy
 
-Bank exports in `files/` and `manual_categories.json` are listed in `.gitignore` and are never committed. Only the folder structure is kept, using `.gitkeep` files.
+Bank exports in `files/`, `manual_categories.json` and `settings.json` are listed in `.gitignore` and are never committed. Only the folder structure is kept, using `.gitkeep` files.

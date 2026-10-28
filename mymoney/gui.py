@@ -13,12 +13,11 @@ import matplotlib.ticker  # noqa: E402
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
+from . import i18n  # noqa: E402
 from .categories import Categorizer  # noqa: E402
+from .i18n import bank_label, fmt_money, t  # noqa: E402
 from .loader import bank_folders, data_files, load_banks, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
-
-ALL_MONTHS = "Όλοι οι μήνες"
-ALL_BANKS = "Όλες οι τράπεζες"
 
 # Χρώματα (σειρά 1 = έσοδα, σειρά 2 = έξοδα)
 SURFACE = "#fcfcfb"
@@ -40,7 +39,7 @@ def _style_axes(ax):
 
 
 def _euro_formatter(ax, axis="y"):
-    formatter = matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f} €".replace(",", "."))
+    formatter = matplotlib.ticker.FuncFormatter(lambda v, _: fmt_money(v, decimals=0))
     (ax.yaxis if axis == "y" else ax.xaxis).set_major_formatter(formatter)
 
 
@@ -94,10 +93,11 @@ class ChartPanel(ttk.Frame):
 
 
 def make_tree(master, columns, widths, anchors=None):
+    """Πίνακας με στήλες· columns είναι κλειδιά μετάφρασης (col.*)."""
     frame = ttk.Frame(master)
-    tree = ttk.Treeview(frame, columns=[c for c in columns], show="headings")
+    tree = ttk.Treeview(frame, columns=list(columns), show="headings")
     for i, (col, width) in enumerate(zip(columns, widths)):
-        tree.heading(col, text=col)
+        tree.heading(col, text=t(col) if col in i18n.STRINGS else col)
         anchor = (anchors or {}).get(i, "w")
         tree.column(col, width=width, anchor=anchor, stretch=(i == 0 or width > 250))
     scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
@@ -115,7 +115,7 @@ class CategoryDialog(tk.Toplevel):
 
     def __init__(self, master, txs, categories, current, whole_description=False):
         super().__init__(master)
-        self.title("Αλλαγή κατηγορίας")
+        self.title(t("dialog.title"))
         self.transient(master)
         self.resizable(False, False)
         self.result = None
@@ -123,14 +123,14 @@ class CategoryDialog(tk.Toplevel):
 
         body = ttk.Frame(self, padding=16)
         body.pack(fill="both", expand=True)
-        total = sum(t.amount for t in txs)
-        descriptions = sorted({t.description for t in txs})
-        summary = f"{len(txs)} κινήσεις · σύνολο {fmt(total)}"
+        total = sum(tx.amount for tx in txs)
+        descriptions = sorted({tx.description for tx in txs})
+        summary = t("tx.summary", count=len(txs), total=fmt(total))
         if len(descriptions) == 1:
             summary = f"{descriptions[0]}\n{summary}"
         ttk.Label(body, text=summary, foreground=TEXT_MUTED).pack(anchor="w", pady=(0, 10))
 
-        ttk.Label(body, text="Κατηγορία (διάλεξε ή γράψε νέα):").pack(anchor="w")
+        ttk.Label(body, text=t("dialog.prompt")).pack(anchor="w")
         self.name_var = tk.StringVar(value=current)
         box = ttk.Combobox(body, textvariable=self.name_var, values=categories, width=40)
         box.pack(fill="x", pady=(2, 10))
@@ -138,23 +138,18 @@ class CategoryDialog(tk.Toplevel):
         box.select_range(0, "end")
 
         self.whole_var = tk.BooleanVar(value=whole_description)
-        ttk.Checkbutton(
-            body, variable=self.whole_var,
-            text="Όλες οι κινήσεις με την ίδια περιγραφή (και οι μελλοντικές)",
-        ).pack(anchor="w")
+        ttk.Checkbutton(body, variable=self.whole_var, text=t("dialog.whole")).pack(anchor="w")
 
-        self.income_var = tk.BooleanVar(value=all(t.amount > 0 for t in txs))
-        self.income_check = ttk.Checkbutton(
-            body, variable=self.income_var, text="Νέα κατηγορία εσόδων (όχι εξόδων)",
-        )
+        self.income_var = tk.BooleanVar(value=all(tx.amount > 0 for tx in txs))
+        self.income_check = ttk.Checkbutton(body, variable=self.income_var, text=t("dialog.income"))
         self.income_check.pack(anchor="w", pady=(4, 0))
         self.name_var.trace_add("write", lambda *_: self._toggle_income())
         self._toggle_income()
 
         buttons = ttk.Frame(body)
         buttons.pack(fill="x", pady=(14, 0))
-        ttk.Button(buttons, text="Άκυρο", command=self.destroy).pack(side="right")
-        ttk.Button(buttons, text="OK", command=self._ok).pack(side="right", padx=6)
+        ttk.Button(buttons, text=t("dialog.cancel"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("dialog.ok"), command=self._ok).pack(side="right", padx=6)
         self.bind("<Return>", lambda _: self._ok())
         self.bind("<Escape>", lambda _: self.destroy())
 
@@ -175,13 +170,14 @@ class CategoryDialog(tk.Toplevel):
 
 
 class MyMoneyApp(tk.Tk):
-    def __init__(self, files_dir: Path, categories_file: Path, manual_file: Path):
+    def __init__(self, files_dir: Path, categories_file: Path, manual_file: Path,
+                 settings_file: Path | None = None):
         super().__init__()
         self.files_dir = files_dir
         self.categories_file = categories_file
         self.manual_file = manual_file
+        self.settings_file = settings_file
         self.tx_items = {}  # iid του πίνακα κινήσεων -> Transaction
-        self.title("MyMoney — Έσοδα & Έξοδα")
         self.geometry("1150x780")
         self.minsize(900, 600)
         self.configure(bg=SURFACE)
@@ -195,36 +191,50 @@ class MyMoneyApp(tk.Tk):
         style.configure("Treeview", rowheight=24)
 
         self.all_transactions = []
-        self.banks: list[str] = []
+        self.banks: list[str] = []  # ονόματα φακέλων, ταξινομημένα κατά εμφανιζόμενο όνομα
         self.stats: Stats | None = None
         self.bank_stats: dict[str, Stats] = {}
         self.transfers = []  # μεταφορές μεταξύ τραπεζών της τρέχουσας περιόδου
 
-        self._build_toolbar()
-        self._build_cards()
-        self._build_tabs()
+        self._build_ui()
         self.reload()
 
     # ---------- κατασκευή UI ----------
 
+    def _build_ui(self):
+        """Χτίζει όλο το παράθυρο στην τρέχουσα γλώσσα (ξανά, όταν αλλάζει)."""
+        for child in self.winfo_children():
+            child.destroy()
+        self.title(t("app.title"))
+        self._build_toolbar()
+        self._build_cards()
+        self._build_tabs()
+
     def _build_toolbar(self):
         bar = ttk.Frame(self, padding=(12, 10))
         bar.pack(fill="x")
-        ttk.Label(bar, text="Περίοδος:").pack(side="left")
-        self.period_var = tk.StringVar(value=ALL_MONTHS)
+        ttk.Label(bar, text=t("toolbar.period")).pack(side="left")
+        self.period_var = tk.StringVar(value=t("all_months"))
         self.period_box = ttk.Combobox(bar, textvariable=self.period_var, state="readonly", width=18)
         self.period_box.pack(side="left", padx=(6, 16))
         self.period_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
-        ttk.Label(bar, text="Τράπεζα:").pack(side="left")
-        self.bank_var = tk.StringVar(value=ALL_BANKS)
-        self.bank_box = ttk.Combobox(bar, textvariable=self.bank_var, state="readonly", width=20)
+        ttk.Label(bar, text=t("toolbar.bank")).pack(side="left")
+        self.bank_var = tk.StringVar(value=t("all_banks"))
+        self.bank_box = ttk.Combobox(bar, textvariable=self.bank_var, state="readonly", width=24)
         self.bank_box.pack(side="left", padx=(6, 16))
         self.bank_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
-        ttk.Button(bar, text="⟳ Επαναφόρτωση αρχείων", command=self.reload).pack(side="left")
-        ttk.Button(bar, text="📂 Φάκελος files", command=self._open_folder).pack(side="left", padx=6)
-        ttk.Button(bar, text="✎ Κατηγορίες", command=self._open_categories).pack(side="left")
+        ttk.Button(bar, text=t("toolbar.reload"), command=self.reload).pack(side="left")
+        ttk.Button(bar, text=t("toolbar.folder"), command=self._open_folder).pack(side="left", padx=6)
+        ttk.Button(bar, text=t("toolbar.categories"), command=self._open_categories).pack(side="left")
+
+        self.language_var = tk.StringVar(value=i18n.LANGUAGES[i18n.get_language()])
+        language_box = ttk.Combobox(bar, textvariable=self.language_var, state="readonly", width=10,
+                                    values=list(i18n.LANGUAGES.values()))
+        language_box.pack(side="right")
+        language_box.bind("<<ComboboxSelected>>", lambda _: self._on_language())
+        ttk.Label(bar, text=t("toolbar.language")).pack(side="right", padx=(16, 6))
         self.status_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.status_var, foreground=TEXT_MUTED).pack(side="right")
 
@@ -232,15 +242,15 @@ class MyMoneyApp(tk.Tk):
         row = ttk.Frame(self, padding=(12, 0, 12, 8))
         row.pack(fill="x")
         self.card_vars = {}
-        titles = ["Έσοδα", "Έξοδα", "Καθαρό αποτέλεσμα", "Τελευταίο υπόλοιπο", "Μέσο έξοδο / ημέρα", "Κινήσεις"]
-        for i, title in enumerate(titles):
+        keys = ["card.income", "card.expenses", "card.net", "card.balance", "card.avg_daily", "card.count"]
+        for i, key in enumerate(keys):
             card = ttk.Frame(row, style="Card.TFrame", padding=(12, 8))
             card.grid(row=0, column=i, sticky="nsew", padx=4)
             row.columnconfigure(i, weight=1)
-            ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
+            ttk.Label(card, text=t(key), style="CardTitle.TLabel").pack(anchor="w")
             var = tk.StringVar(value="-")
             ttk.Label(card, textvariable=var, style="CardValue.TLabel").pack(anchor="w")
-            self.card_vars[title] = var
+            self.card_vars[key] = var
 
     def _build_tabs(self):
         nb = ttk.Notebook(self)
@@ -249,11 +259,11 @@ class MyMoneyApp(tk.Tk):
 
         # Ανά μήνα
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Ανά μήνα")
+        nb.add(tab, text=t("tab.months"))
         self.month_chart = ChartPanel(tab, height=3.6)
         self.month_chart.pack(fill="both", expand=True)
         frame, self.month_tree = make_tree(
-            tab, ["Μήνας", "Έσοδα", "Έξοδα", "Καθαρό"], [150, 150, 150, 150],
+            tab, ["col.month", "col.income", "col.expenses", "col.net"], [150, 150, 150, 150],
             anchors={1: "e", 2: "e", 3: "e"},
         )
         frame.configure(height=170)
@@ -262,11 +272,11 @@ class MyMoneyApp(tk.Tk):
 
         # Ανά τράπεζα
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Ανά τράπεζα")
+        nb.add(tab, text=t("tab.banks"))
         self.bank_chart = ChartPanel(tab, height=3.4)
         self.bank_chart.pack(fill="both", expand=True)
         frame, self.bank_tree = make_tree(
-            tab, ["Τράπεζα", "Έσοδα", "Έξοδα", "Καθαρό", "Υπόλοιπο", "Κινήσεις"],
+            tab, ["col.bank", "col.income", "col.expenses", "col.net", "col.balance", "col.transactions"],
             [180, 130, 130, 130, 130, 80], anchors={1: "e", 2: "e", 3: "e", 4: "e", 5: "e"},
         )
         frame.configure(height=150)
@@ -279,113 +289,138 @@ class MyMoneyApp(tk.Tk):
 
         # Κατηγορίες εξόδων
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Κατηγορίες εξόδων")
+        nb.add(tab, text=t("tab.categories"))
         paned = ttk.PanedWindow(tab, orient="horizontal")
         paned.pack(fill="both", expand=True)
         self.cat_chart = ChartPanel(paned)
         frame, self.cat_tree = make_tree(
-            paned, ["Κατηγορία", "Ποσό", "%", "Πλήθος"], [160, 95, 55, 55],
+            paned, ["col.category", "col.amount", "%", "col.count"], [160, 95, 55, 55],
             anchors={1: "e", 2: "e", 3: "e"},
         )
         self.cat_tree.bind("<Double-1>", self._on_category_open)
         paned.add(self.cat_chart, weight=3)
         paned.add(frame, weight=2)
-        ttk.Label(tab, text="Διπλό κλικ σε κατηγορία για να δεις τις κινήσεις της.",
-                  foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
+        ttk.Label(tab, text=t("hint.categories"), foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
 
         # Ημερήσια έξοδα
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Ημερήσια έξοδα")
+        nb.add(tab, text=t("tab.daily"))
         self.daily_chart = ChartPanel(tab)
         self.daily_chart.pack(fill="both", expand=True)
 
         # Top δαπάνες ανά έμπορο
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Top έμποροι")
+        nb.add(tab, text=t("tab.merchants"))
         frame, self.merchant_tree = make_tree(
-            tab, ["Περιγραφή", "Κατηγορία", "Σύνολο", "Πλήθος", "Μέσος όρος"],
+            tab, ["col.description", "col.category", "col.total", "col.count", "col.average"],
             [320, 200, 120, 70, 120], anchors={2: "e", 3: "e", 4: "e"},
         )
         frame.pack(fill="both", expand=True)
         self.merchant_tree.bind("<Double-1>", self._on_merchant_edit)
-        ttk.Label(tab, text="Διπλό κλικ για να βάλεις όλες τις κινήσεις του εμπόρου σε κατηγορία.",
-                  foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
+        ttk.Label(tab, text=t("hint.merchants"), foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
 
         # Κινήσεις
         tab = ttk.Frame(nb, padding=8)
-        nb.add(tab, text="Κινήσεις")
+        nb.add(tab, text=t("tab.transactions"))
         self.tx_tab = tab
         filters = ttk.Frame(tab)
         filters.pack(fill="x", pady=(0, 6))
-        ttk.Label(filters, text="Αναζήτηση:").pack(side="left")
+        ttk.Label(filters, text=t("tx.search")).pack(side="left")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._fill_transactions())
         ttk.Entry(filters, textvariable=self.search_var, width=30).pack(side="left", padx=6)
-        ttk.Label(filters, text="Κατηγορία:").pack(side="left", padx=(12, 0))
-        self.cat_filter_var = tk.StringVar(value="Όλες")
+        ttk.Label(filters, text=t("tx.category")).pack(side="left", padx=(12, 0))
+        self.cat_filter_var = tk.StringVar(value=t("all_categories"))
         self.cat_filter_box = ttk.Combobox(filters, textvariable=self.cat_filter_var, state="readonly", width=28)
         self.cat_filter_box.pack(side="left", padx=6)
         self.cat_filter_box.bind("<<ComboboxSelected>>", lambda _: self._fill_transactions())
         self.tx_total_var = tk.StringVar()
         ttk.Label(filters, textvariable=self.tx_total_var, foreground=TEXT_MUTED).pack(side="right")
         frame, self.tx_tree = make_tree(
-            tab, ["Ημερομηνία", "Τράπεζα", "Περιγραφή", "Κατηγορία", "Ποσό", "Υπόλοιπο"],
+            tab, ["col.date", "col.bank", "col.description", "col.category", "col.amount", "col.balance"],
             [100, 120, 320, 190, 110, 120], anchors={4: "e", 5: "e"},
         )
         frame.pack(fill="both", expand=True)
 
         actions = ttk.Frame(tab)
         actions.pack(fill="x", pady=(6, 0))
-        ttk.Button(actions, text="Αλλαγή κατηγορίας…", command=self._edit_selected).pack(side="left")
-        ttk.Button(actions, text="Επαναφορά αυτόματης κατηγορίας",
+        ttk.Button(actions, text=t("tx.change_category"), command=self._edit_selected).pack(side="left")
+        ttk.Button(actions, text=t("tx.reset_category"),
                    command=self._clear_selected).pack(side="left", padx=6)
-        ttk.Label(actions, foreground=TEXT_MUTED,
-                  text="Ctrl/Shift + κλικ για πολλές κινήσεις · διπλό ή δεξί κλικ · ✎ = χειροκίνητη κατηγορία",
-                  ).pack(side="left", padx=12)
+        ttk.Label(actions, foreground=TEXT_MUTED, text=t("hint.transactions")).pack(side="left", padx=12)
 
         self.tx_menu = tk.Menu(self, tearoff=False)
-        self.tx_menu.add_command(label="Αλλαγή κατηγορίας…", command=self._edit_selected)
-        self.tx_menu.add_command(label="Επαναφορά αυτόματης κατηγορίας", command=self._clear_selected)
+        self.tx_menu.add_command(label=t("tx.change_category"), command=self._edit_selected)
+        self.tx_menu.add_command(label=t("tx.reset_category"), command=self._clear_selected)
         self.tx_tree.bind("<Double-1>", lambda _: self._edit_selected())
         self.tx_tree.bind("<Button-3>", self._on_tx_right_click)
 
+    # ---------- γλώσσα ----------
+
+    def _on_language(self):
+        codes = {name: code for code, name in i18n.LANGUAGES.items()}
+        language = codes[self.language_var.get()]
+        if language == i18n.get_language():
+            return
+        # Κρατάμε τις επιλογές φίλτρων σε μορφή ανεξάρτητη από τη γλώσσα.
+        month = self._selected_month()
+        bank = self._selected_bank()
+        tab = self.notebook.index(self.notebook.select())
+        i18n.set_language(language)
+        if self.settings_file is not None:
+            i18n.save_settings(self.settings_file)
+        self._build_ui()
+        self._update_filters(month, bank)
+        self.refresh()
+        self.notebook.select(tab)
+
     # ---------- δεδομένα ----------
 
+    def _selected_month(self) -> str | None:
+        period = self.period_var.get()
+        return None if period == t("all_months") else period
+
+    def _selected_bank(self) -> str | None:
+        labels = {bank_label(b): b for b in self.banks}
+        return labels.get(self.bank_var.get())
+
     def reload(self):
+        month, bank = self._selected_month(), self._selected_bank()
         try:
             self.all_transactions = load_banks(self.files_dir)
             self.categorizer = Categorizer.from_file(self.categories_file, self.manual_file)
         except Exception as exc:  # εμφάνιση σφάλματος αντί για crash
-            messagebox.showerror("Σφάλμα", f"Αποτυχία ανάγνωσης αρχείων:\n{exc}")
+            messagebox.showerror(t("msg.error"), t("msg.load_failed", error=exc))
             return
-        files = sum(len(data_files(f)) for f in bank_folders(self.files_dir))
-        self.banks = sorted({t.bank for t in self.all_transactions})
-        self.status_var.set(f"{len(self.banks)} τράπεζες · {files} αρχεία · "
-                            f"{len(self.all_transactions)} κινήσεις")
-        months = sorted({t.month for t in self.all_transactions}, reverse=True)
-        self.period_box["values"] = [ALL_MONTHS, *months]
-        if self.period_var.get() not in self.period_box["values"]:
-            self.period_var.set(ALL_MONTHS)
-        self.bank_box["values"] = [ALL_BANKS, *self.banks]
-        if self.bank_var.get() not in self.bank_box["values"]:
-            self.bank_var.set(ALL_BANKS)
+        self.banks = sorted({tx.bank for tx in self.all_transactions}, key=bank_label)
+        self._update_filters(month, bank)
         self.refresh()
 
+    def _update_filters(self, month: str | None, bank: str | None):
+        files = sum(len(data_files(f)) for f in bank_folders(self.files_dir))
+        self.status_var.set(t("status", banks=len(self.banks), files=files,
+                              count=len(self.all_transactions)))
+        months = sorted({tx.month for tx in self.all_transactions}, reverse=True)
+        self.period_box["values"] = [t("all_months"), *months]
+        self.period_var.set(month if month in months else t("all_months"))
+        self.bank_box["values"] = [t("all_banks"), *map(bank_label, self.banks)]
+        self.bank_var.set(bank_label(bank) if bank in self.banks else t("all_banks"))
+
     def refresh(self):
-        period = self.period_var.get()
+        month = self._selected_month()
         txs = self.all_transactions
-        if period != ALL_MONTHS:
-            txs = [t for t in txs if t.month == period]
+        if month:
+            txs = [tx for tx in txs if tx.month == month]
         # Κάθε τράπεζα ξεχωριστά: οι μεταφορές προς/από άλλες τράπεζες μετράνε κανονικά.
         self.bank_stats = {
-            bank: compute([t for t in txs if t.bank == bank], self.categorizer)
+            bank: compute([tx for tx in txs if tx.bank == bank], self.categorizer)
             for bank in self.banks
         }
         # Σύνολο: οι μεταφορές μεταξύ των τραπεζών αλληλοαναιρούνται.
         combined, self.transfers = split_transfers(txs)
         self.combined_stats = compute(combined, self.categorizer)
-        bank = self.bank_var.get()
-        self.stats = self.combined_stats if bank == ALL_BANKS else self.bank_stats[bank]
+        bank = self._selected_bank()
+        self.stats = self.combined_stats if bank is None else self.bank_stats[bank]
         self._fill_cards()
         self._fill_months()
         self._fill_banks()
@@ -393,19 +428,43 @@ class MyMoneyApp(tk.Tk):
         self._fill_daily()
         self._fill_merchants()
         cats = sorted(set(self.stats.categories.values()))
-        self.cat_filter_box["values"] = ["Όλες", *cats]
+        self.cat_filter_box["values"] = [t("all_categories"), *cats]
         if self.cat_filter_var.get() not in self.cat_filter_box["values"]:
-            self.cat_filter_var.set("Όλες")
+            self.cat_filter_var.set(t("all_categories"))
         self._fill_transactions()
 
     def _fill_cards(self):
         s = self.stats
-        self.card_vars["Έσοδα"].set(fmt(s.income))
-        self.card_vars["Έξοδα"].set(fmt(s.expenses))
-        self.card_vars["Καθαρό αποτέλεσμα"].set(("+" if s.net > 0 else "") + fmt(s.net))
-        self.card_vars["Τελευταίο υπόλοιπο"].set(fmt(s.last_balance))
-        self.card_vars["Μέσο έξοδο / ημέρα"].set(fmt(s.avg_daily_expense))
-        self.card_vars["Κινήσεις"].set(str(len(s.transactions)))
+        self.card_vars["card.income"].set(fmt(s.income))
+        self.card_vars["card.expenses"].set(fmt(s.expenses))
+        self.card_vars["card.net"].set(("+" if s.net > 0 else "") + fmt(s.net))
+        self.card_vars["card.balance"].set(fmt(s.last_balance))
+        self.card_vars["card.avg_daily"].set(fmt(s.avg_daily_expense))
+        self.card_vars["card.count"].set(str(len(s.transactions)))
+
+    def _income_expense_chart(self, chart, rows, title):
+        """Ομαδοποιημένες μπάρες εσόδων/εξόδων· rows = [(ετικέτα, έσοδα, έξοδα)]."""
+        ax = chart.new_axes()
+        if rows:
+            labels = [label for label, _, _ in rows]
+            x = range(len(labels))
+            w = 0.38
+            inc = ax.bar([i - w / 2 - 0.01 for i in x], [float(r[1]) for r in rows],
+                         width=w, color=INCOME, label=t("col.income"))
+            exp = ax.bar([i + w / 2 + 0.01 for i in x], [float(r[2]) for r in rows],
+                         width=w, color=EXPENSE, label=t("col.expenses"))
+            for (label, income, _), b in zip(rows, inc):
+                chart.add_hover(b, f"{label}\n{t('hover.income', amount=fmt(income))}")
+            for (label, _, expenses), b in zip(rows, exp):
+                chart.add_hover(b, f"{label}\n{t('hover.expenses', amount=fmt(expenses))}")
+            ax.set_xticks(list(x), labels)
+            ax.set_xlim(-0.6, max(len(labels) - 0.4, 1.4))
+            _euro_formatter(ax)
+            top = max(max(r[1], r[2]) for r in rows)
+            ax.set_ylim(0, float(top) * 1.2 or 1)
+            ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=TEXT_MUTED)
+            ax.set_title(title, loc="left", fontsize=11, color=TEXT)
+        chart.draw()
 
     def _fill_months(self):
         s = self.stats
@@ -414,80 +473,41 @@ class MyMoneyApp(tk.Tk):
         for m in reversed(s.months):
             tree.insert("", "end", values=(m.month, fmt(m.income), fmt(m.expenses), fmt(m.net)))
         if len(s.months) > 1:
-            tree.insert("", "end", values=("Σύνολο", fmt(s.income), fmt(s.expenses), fmt(s.net)), tags=("total",))
-
-        chart = self.month_chart
-        ax = chart.new_axes()
-        if s.months:
-            labels = [m.month for m in s.months]
-            x = range(len(labels))
-            w = 0.38
-            inc = ax.bar([i - w / 2 - 0.01 for i in x], [float(m.income) for m in s.months],
-                         width=w, color=INCOME, label="Έσοδα")
-            exp = ax.bar([i + w / 2 + 0.01 for i in x], [float(m.expenses) for m in s.months],
-                         width=w, color=EXPENSE, label="Έξοδα")
-            for m, b in zip(s.months, inc):
-                chart.add_hover(b, f"{m.month}\nΈσοδα: {fmt(m.income)}")
-            for m, b in zip(s.months, exp):
-                chart.add_hover(b, f"{m.month}\nΈξοδα: {fmt(m.expenses)}")
-            ax.set_xticks(list(x), labels)
-            ax.set_xlim(-0.6, max(len(labels) - 0.4, 1.4))
-            _euro_formatter(ax)
-            top = max(max(m.income, m.expenses) for m in s.months)
-            ax.set_ylim(0, float(top) * 1.2 or 1)
-            ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=TEXT_MUTED)
-            ax.set_title("Έσοδα και έξοδα ανά μήνα", loc="left", fontsize=11, color=TEXT)
-        chart.draw()
+            tree.insert("", "end", values=(t("total"), fmt(s.income), fmt(s.expenses), fmt(s.net)),
+                        tags=("total",))
+        self._income_expense_chart(self.month_chart, [(m.month, m.income, m.expenses) for m in s.months],
+                                   t("chart.months"))
 
     def _fill_banks(self):
         tree = self.bank_tree
         tree.delete(*tree.get_children())
         rows = [(bank, s) for bank, s in self.bank_stats.items() if s.transactions]
         for bank, s in rows:
-            tree.insert("", "end", values=(bank, fmt(s.income), fmt(s.expenses), fmt(s.net),
+            tree.insert("", "end", values=(bank_label(bank), fmt(s.income), fmt(s.expenses), fmt(s.net),
                                            fmt(s.last_balance), len(s.transactions)))
         if len(rows) > 1:
             total = self.combined_stats
-            tree.insert("", "end", values=("Σύνολο", fmt(total.income), fmt(total.expenses),
+            tree.insert("", "end", values=(t("total"), fmt(total.income), fmt(total.expenses),
                                            fmt(total.net), fmt(total.last_balance),
                                            len(total.transactions)), tags=("total",))
 
-        hint = "Διπλό κλικ σε τράπεζα για να δεις μόνο αυτή."
+        hint = t("hint.bank_open")
         if self.transfers:
-            moved = sum(t.amount for t in self.transfers if t.amount > 0)
-            hint = (f"{len(self.transfers) // 2} μεταφορές μεταξύ των τραπεζών ({fmt(moved)}) "
-                    "δεν μετρούν ως έσοδα/έξοδα στο σύνολο, μόνο στην κάθε τράπεζα. " + hint)
+            moved = sum(tx.amount for tx in self.transfers if tx.amount > 0)
+            hint = t("hint.transfers", count=len(self.transfers) // 2, amount=fmt(moved)) + hint
         self.transfer_var.set(hint)
 
-        chart = self.bank_chart
-        ax = chart.new_axes()
-        if rows:
-            labels = [bank for bank, _ in rows]
-            x = range(len(labels))
-            w = 0.38
-            inc = ax.bar([i - w / 2 - 0.01 for i in x], [float(s.income) for _, s in rows],
-                         width=w, color=INCOME, label="Έσοδα")
-            exp = ax.bar([i + w / 2 + 0.01 for i in x], [float(s.expenses) for _, s in rows],
-                         width=w, color=EXPENSE, label="Έξοδα")
-            for (bank, s), b in zip(rows, inc):
-                chart.add_hover(b, f"{bank}\nΈσοδα: {fmt(s.income)}")
-            for (bank, s), b in zip(rows, exp):
-                chart.add_hover(b, f"{bank}\nΈξοδα: {fmt(s.expenses)}")
-            ax.set_xticks(list(x), labels)
-            ax.set_xlim(-0.6, max(len(labels) - 0.4, 1.4))
-            _euro_formatter(ax)
-            top = max(max(s.income, s.expenses) for _, s in rows)
-            ax.set_ylim(0, float(top) * 1.2 or 1)
-            ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=TEXT_MUTED)
-            ax.set_title("Έσοδα και έξοδα ανά τράπεζα", loc="left", fontsize=11, color=TEXT)
-        chart.draw()
+        self._income_expense_chart(self.bank_chart,
+                                   [(bank_label(bank), s.income, s.expenses) for bank, s in rows],
+                                   t("chart.banks"))
 
     def _on_bank_open(self, _event):
         sel = self.bank_tree.selection()
         if not sel:
             return
         name = self.bank_tree.item(sel[0], "values")[0]
-        self.bank_var.set(name if name in self.banks else ALL_BANKS)
+        labels = [bank_label(b) for b in self.banks]
+        self.bank_var.set(name if name in labels else t("all_banks"))
         self.refresh()
 
     def _fill_categories(self):
@@ -510,12 +530,13 @@ class MyMoneyApp(tk.Tk):
                            color=EXPENSE, height=0.6)
             for c, b in zip(cats, bars):
                 pct = c.total / s.expenses * 100
-                chart.add_hover(b, f"{c.name}\n{fmt(c.total)} · {pct:.1f}% · {c.count} κινήσεις")
+                chart.add_hover(b, f"{c.name}\n" + t("hover.category", amount=fmt(c.total),
+                                                      pct=f"{pct:.1f}", count=c.count))
                 ax.text(b.get_width(), b.get_y() + b.get_height() / 2, f"  {fmt(c.total)}",
                         va="center", fontsize=8, color=TEXT_MUTED)
             ax.set_xlim(0, max(float(cats[-1].total), 1) * 1.25)
             _euro_formatter(ax, "x")
-            ax.set_title("Έξοδα ανά κατηγορία", loc="left", fontsize=11, color=TEXT)
+            ax.set_title(t("chart.categories"), loc="left", fontsize=11, color=TEXT)
         chart.draw()
 
     def _fill_daily(self):
@@ -529,18 +550,18 @@ class MyMoneyApp(tk.Tk):
                 chart.add_hover(b, f"{d:%d/%m/%Y}\n{fmt(daily[d])}")
             avg = float(self.stats.avg_daily_expense)
             ax.axhline(avg, color=TEXT_MUTED, linewidth=1, linestyle="--")
-            ax.text(days[0], avg, f" μέσος όρος {fmt(self.stats.avg_daily_expense)}",
+            ax.text(days[0], avg, t("chart.average", amount=fmt(self.stats.avg_daily_expense)),
                     va="bottom", fontsize=8, color=TEXT_MUTED)
             ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%d/%m"))
             _euro_formatter(ax)
-            ax.set_title("Έξοδα ανά ημέρα", loc="left", fontsize=11, color=TEXT)
+            ax.set_title(t("chart.daily"), loc="left", fontsize=11, color=TEXT)
         chart.draw()
 
     def _fill_merchants(self):
         s = self.stats
         tree = self.merchant_tree
         tree.delete(*tree.get_children())
-        cat_of = {t.description: s.categories[t] for t in s.transactions}
+        cat_of = {tx.description: s.categories[tx] for tx in s.transactions}
         for m in s.top_merchants:
             tree.insert("", "end", values=(m.name, cat_of.get(m.name, ""), fmt(m.total),
                                            m.count, fmt(m.total / m.count)))
@@ -550,25 +571,26 @@ class MyMoneyApp(tk.Tk):
             return
         query = self.search_var.get().casefold().strip()
         cat = self.cat_filter_var.get()
+        all_categories = t("all_categories")
         tree = self.tx_tree
         tree.delete(*tree.get_children())
         self.tx_items = {}
         total = 0
         count = 0
-        for t in reversed(self.stats.transactions):
-            tcat = self.stats.categories[t]
-            if cat != "Όλες" and tcat != cat:
+        for tx in reversed(self.stats.transactions):
+            tcat = self.stats.categories[tx]
+            if cat != all_categories and tcat != cat:
                 continue
-            if query and query not in t.description.casefold():
+            if query and query not in tx.description.casefold():
                 continue
-            total += t.amount
+            total += tx.amount
             count += 1
-            shown_cat = f"✎ {tcat}" if self.categorizer.is_manual(t) else tcat
-            iid = tree.insert("", "end", values=(f"{t.date:%d/%m/%Y}", t.bank, t.description,
-                                                 shown_cat, fmt(t.amount), fmt(t.balance)),
-                              tags=("income" if t.is_income else "expense",))
-            self.tx_items[iid] = t
-        self.tx_total_var.set(f"{count} κινήσεις · σύνολο {fmt(total)}")
+            shown_cat = f"✎ {tcat}" if self.categorizer.is_manual(tx) else tcat
+            iid = tree.insert("", "end", values=(f"{tx.date:%d/%m/%Y}", bank_label(tx.bank), tx.description,
+                                                 shown_cat, fmt(tx.amount), fmt(tx.balance)),
+                              tags=("income" if tx.is_income else "expense",))
+            self.tx_items[iid] = tx
+        self.tx_total_var.set(t("tx.summary", count=count, total=fmt(total)))
 
     # ---------- χειροκίνητες κατηγορίες ----------
 
@@ -584,9 +606,9 @@ class MyMoneyApp(tk.Tk):
 
     def _assign_dialog(self, txs, whole_description=False):
         if not txs:
-            messagebox.showinfo("Κατηγορία", "Διάλεξε πρώτα μία ή περισσότερες κινήσεις.")
+            messagebox.showinfo(t("msg.category"), t("msg.select_first"))
             return
-        current = {self.stats.categories[t] for t in txs}
+        current = {self.stats.categories[tx] for tx in txs}
         dialog = CategoryDialog(
             self, txs, self.categorizer.all_categories(),
             current.pop() if len(current) == 1 else "", whole_description,
@@ -611,7 +633,7 @@ class MyMoneyApp(tk.Tk):
         if not sel:
             return
         description = self.merchant_tree.item(sel[0], "values")[0]
-        txs = [t for t in self.stats.transactions if t.description == description]
+        txs = [tx for tx in self.stats.transactions if tx.description == description]
         self._assign_dialog(txs, whole_description=True)
 
     # ---------- ενέργειες ----------
@@ -633,6 +655,4 @@ class MyMoneyApp(tk.Tk):
     def _open_categories(self):
         if self.categories_file.exists():
             os.startfile(self.categories_file)
-            messagebox.showinfo("Κατηγορίες",
-                                "Αφού αποθηκεύσεις τις αλλαγές στο categories.json, "
-                                "πάτα «Επαναφόρτωση αρχείων».")
+            messagebox.showinfo(t("msg.categories"), t("msg.categories_reload"))
