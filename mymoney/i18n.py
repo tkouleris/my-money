@@ -1,11 +1,12 @@
 """Μεταφράσεις (ελληνικά / αγγλικά) και μορφοποίηση ποσών ανά γλώσσα.
 
-Η γλώσσα αποθηκεύεται στο settings.json· προεπιλογή τα ελληνικά.
+Η γλώσσα αποθηκεύεται στο settings.json (βλ. settings.py)· προεπιλογή τα ελληνικά.
 """
 
-import json
 from decimal import Decimal
 from pathlib import Path
+
+from . import settings
 
 LANGUAGES = {"el": "Ελληνικά", "en": "English"}
 DEFAULT_LANGUAGE = "el"
@@ -23,7 +24,8 @@ STRINGS = {
     "toolbar.year": ("Έτος:", "Year:"),
     "toolbar.month": ("Μήνας:", "Month:"),
     "toolbar.bank": ("Τράπεζα:", "Bank:"),
-    "toolbar.language": ("Γλώσσα:", "Language:"),
+    "theme.to_dark": ("☾ Σκοτεινό", "☾ Dark"),
+    "theme.to_light": ("☀ Φωτεινό", "☀ Light"),
     "toolbar.reload": ("⟳ Επαναφόρτωση αρχείων", "⟳ Reload files"),
     "toolbar.folder": ("📂 Φάκελος files", "📂 Files folder"),
     "toolbar.categories": ("✎ Κατηγορίες", "✎ Categories"),
@@ -220,13 +222,8 @@ def fmt_money(value: Decimal | float | None, decimals: int = 2) -> str:
 
 
 def load_settings(path: Path):
-    try:
-        with path.open(encoding="utf-8") as f:
-            set_language(json.load(f).get("language", DEFAULT_LANGUAGE))
-    except (OSError, ValueError):
-        set_language(DEFAULT_LANGUAGE)
+    set_language(settings.read(path).get("language", DEFAULT_LANGUAGE))
 
 
 def save_settings(path: Path):
-    with path.open("w", encoding="utf-8") as f:
-        json.dump({"language": _language}, f, ensure_ascii=False, indent=2)
+    settings.update(path, language=_language)

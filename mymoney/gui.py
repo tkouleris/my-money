@@ -13,28 +13,20 @@ import matplotlib.ticker  # noqa: E402
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
-from . import i18n  # noqa: E402
+from . import i18n, theme  # noqa: E402
 from .categories import Categorizer  # noqa: E402
 from .i18n import bank_label, fmt_money, month_name, t  # noqa: E402
 from .loader import bank_folders, data_files, load_banks, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
-
-# Χρώματα (σειρά 1 = έσοδα, σειρά 2 = έξοδα)
-SURFACE = "#fcfcfb"
-TEXT = "#0b0b0b"
-TEXT_MUTED = "#52514e"
-GRID = "#e4e3df"
-INCOME = "#2a78d6"
-EXPENSE = "#eb6834"
-
+from .theme import palette as colors  # noqa: E402
 
 def _style_axes(ax):
-    ax.set_facecolor(SURFACE)
+    ax.set_facecolor(colors().surface)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
-    ax.spines["bottom"].set_color(GRID)
-    ax.tick_params(colors=TEXT_MUTED, labelsize=9, length=0)
-    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.spines["bottom"].set_color(colors().grid)
+    ax.tick_params(colors=colors().text_muted, labelsize=9, length=0)
+    ax.grid(axis="y", color=colors().grid, linewidth=0.8)
     ax.set_axisbelow(True)
 
 
@@ -48,7 +40,8 @@ class ChartPanel(ttk.Frame):
 
     def __init__(self, master, height=4):
         super().__init__(master)
-        self.figure = Figure(figsize=(8, height), dpi=100, facecolor=SURFACE, layout="constrained")
+        self.figure = Figure(figsize=(8, height), dpi=100, facecolor=colors().surface,
+                             layout="constrained")
         self.canvas = FigureCanvasTkAgg(self.figure, master=self)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self._hover_items = []  # (artist, κείμενο)
@@ -62,8 +55,8 @@ class ChartPanel(ttk.Frame):
         _style_axes(ax)
         self._annot = ax.annotate(
             "", xy=(0, 0), xytext=(10, 10), textcoords="offset points",
-            fontsize=9, color=TEXT,
-            bbox=dict(boxstyle="round,pad=0.4", fc="white", ec=GRID),
+            fontsize=9, color=colors().text,
+            bbox=dict(boxstyle="round,pad=0.4", fc=colors().card, ec=colors().grid),
         )
         self._annot.set_visible(False)
         return ax
@@ -104,8 +97,8 @@ def make_tree(master, columns, widths, anchors=None):
     tree.configure(yscrollcommand=scroll.set)
     tree.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
-    tree.tag_configure("income", foreground=INCOME)
-    tree.tag_configure("expense", foreground=TEXT)
+    tree.tag_configure("income", foreground=colors().income)
+    tree.tag_configure("expense", foreground=colors().text)
     tree.tag_configure("total", font=("Segoe UI", 9, "bold"))
     return frame, tree
 
@@ -128,7 +121,7 @@ class CategoryDialog(tk.Toplevel):
         summary = t("tx.summary", count=len(txs), total=fmt(total))
         if len(descriptions) == 1:
             summary = f"{descriptions[0]}\n{summary}"
-        ttk.Label(body, text=summary, foreground=TEXT_MUTED).pack(anchor="w", pady=(0, 10))
+        ttk.Label(body, text=summary, foreground=colors().text_muted).pack(anchor="w", pady=(0, 10))
 
         ttk.Label(body, text=t("dialog.prompt")).pack(anchor="w")
         self.name_var = tk.StringVar(value=current)
@@ -153,6 +146,7 @@ class CategoryDialog(tk.Toplevel):
         self.bind("<Return>", lambda _: self._ok())
         self.bind("<Escape>", lambda _: self.destroy())
 
+        theme.style_title_bar(self)
         self.grab_set()
         self.wait_window()
 
@@ -180,15 +174,7 @@ class MyMoneyApp(tk.Tk):
         self.tx_items = {}  # iid του πίνακα κινήσεων -> Transaction
         self.geometry("1150x780")
         self.minsize(900, 600)
-        self.configure(bg=SURFACE)
-
-        style = ttk.Style(self)
-        if "vista" in style.theme_names():
-            style.theme_use("vista")
-        style.configure("Card.TFrame", background="white", relief="solid", borderwidth=1)
-        style.configure("CardTitle.TLabel", background="white", foreground=TEXT_MUTED, font=("Segoe UI", 9))
-        style.configure("CardValue.TLabel", background="white", foreground=TEXT, font=("Segoe UI", 15, "bold"))
-        style.configure("Treeview", rowheight=24)
+        theme.apply(self)
 
         self.all_transactions = []
         self.banks: list[str] = []  # ονόματα φακέλων, ταξινομημένα κατά εμφανιζόμενο όνομα
@@ -209,11 +195,22 @@ class MyMoneyApp(tk.Tk):
         self.title(t("app.title"))
         self._build_toolbar()
         self._build_cards()
+        self._build_statusbar()
         self._build_tabs()
 
     def _build_toolbar(self):
         bar = ttk.Frame(self, padding=(12, 10))
         bar.pack(fill="x")
+        # Γλώσσα και θέμα πρώτα, ώστε να μην κρύβονται όταν το παράθυρο στενεύει.
+        self.language_var = tk.StringVar(value=i18n.LANGUAGES[i18n.get_language()])
+        language_box = ttk.Combobox(bar, textvariable=self.language_var, state="readonly", width=9,
+                                    values=list(i18n.LANGUAGES.values()))
+        language_box.pack(side="right")
+        language_box.bind("<<ComboboxSelected>>", lambda _: self._on_language())
+        ttk.Button(bar, command=self._toggle_theme,
+                   text=t("theme.to_light" if theme.get_theme() == "dark" else "theme.to_dark"),
+                   ).pack(side="right", padx=(12, 6))
+
         ttk.Label(bar, text=t("toolbar.year")).pack(side="left")
         self.year_var = tk.StringVar(value=t("all_years"))
         self.year_box = ttk.Combobox(bar, textvariable=self.year_var, state="readonly", width=12)
@@ -228,7 +225,7 @@ class MyMoneyApp(tk.Tk):
 
         ttk.Label(bar, text=t("toolbar.bank")).pack(side="left")
         self.bank_var = tk.StringVar(value=t("all_banks"))
-        self.bank_box = ttk.Combobox(bar, textvariable=self.bank_var, state="readonly", width=24)
+        self.bank_box = ttk.Combobox(bar, textvariable=self.bank_var, state="readonly", width=18)
         self.bank_box.pack(side="left", padx=(6, 16))
         self.bank_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
@@ -236,14 +233,11 @@ class MyMoneyApp(tk.Tk):
         ttk.Button(bar, text=t("toolbar.folder"), command=self._open_folder).pack(side="left", padx=6)
         ttk.Button(bar, text=t("toolbar.categories"), command=self._open_categories).pack(side="left")
 
-        self.language_var = tk.StringVar(value=i18n.LANGUAGES[i18n.get_language()])
-        language_box = ttk.Combobox(bar, textvariable=self.language_var, state="readonly", width=10,
-                                    values=list(i18n.LANGUAGES.values()))
-        language_box.pack(side="right")
-        language_box.bind("<<ComboboxSelected>>", lambda _: self._on_language())
-        ttk.Label(bar, text=t("toolbar.language")).pack(side="right", padx=(16, 6))
+    def _build_statusbar(self):
+        bar = ttk.Frame(self, padding=(12, 0, 12, 10))
+        bar.pack(side="bottom", fill="x")
         self.status_var = tk.StringVar()
-        ttk.Label(bar, textvariable=self.status_var, foreground=TEXT_MUTED).pack(side="right")
+        ttk.Label(bar, textvariable=self.status_var, foreground=colors().text_muted).pack(side="left")
 
     def _build_cards(self):
         row = ttk.Frame(self, padding=(12, 0, 12, 8))
@@ -261,7 +255,7 @@ class MyMoneyApp(tk.Tk):
 
     def _build_tabs(self):
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        nb.pack(fill="both", expand=True, padx=12, pady=(0, 8))
         self.notebook = nb
 
         # Ανά έτος
@@ -305,7 +299,7 @@ class MyMoneyApp(tk.Tk):
         frame.pack(fill="x", pady=(8, 0))
         self.bank_tree.bind("<Double-1>", self._on_bank_open)
         self.transfer_var = tk.StringVar()
-        ttk.Label(tab, textvariable=self.transfer_var, foreground=TEXT_MUTED,
+        ttk.Label(tab, textvariable=self.transfer_var, foreground=colors().text_muted,
                   wraplength=1000, justify="left").pack(anchor="w", pady=(4, 0))
 
         # Κατηγορίες εξόδων
@@ -321,7 +315,7 @@ class MyMoneyApp(tk.Tk):
         self.cat_tree.bind("<Double-1>", self._on_category_open)
         paned.add(self.cat_chart, weight=3)
         paned.add(frame, weight=2)
-        ttk.Label(tab, text=t("hint.categories"), foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
+        ttk.Label(tab, text=t("hint.categories"), foreground=colors().text_muted).pack(anchor="w", pady=(4, 0))
 
         # Ημερήσια έξοδα
         tab = ttk.Frame(nb, padding=8)
@@ -338,7 +332,7 @@ class MyMoneyApp(tk.Tk):
         )
         frame.pack(fill="both", expand=True)
         self.merchant_tree.bind("<Double-1>", self._on_merchant_edit)
-        ttk.Label(tab, text=t("hint.merchants"), foreground=TEXT_MUTED).pack(anchor="w", pady=(4, 0))
+        ttk.Label(tab, text=t("hint.merchants"), foreground=colors().text_muted).pack(anchor="w", pady=(4, 0))
 
         # Κινήσεις
         tab = ttk.Frame(nb, padding=8)
@@ -356,7 +350,7 @@ class MyMoneyApp(tk.Tk):
         self.cat_filter_box.pack(side="left", padx=6)
         self.cat_filter_box.bind("<<ComboboxSelected>>", lambda _: self._fill_transactions())
         self.tx_total_var = tk.StringVar()
-        ttk.Label(filters, textvariable=self.tx_total_var, foreground=TEXT_MUTED).pack(side="right")
+        ttk.Label(filters, textvariable=self.tx_total_var, foreground=colors().text_muted).pack(side="right")
         frame, self.tx_tree = make_tree(
             tab, ["col.date", "col.bank", "col.description", "col.category", "col.amount", "col.balance"],
             [100, 120, 320, 190, 110, 120], anchors={4: "e", 5: "e"},
@@ -368,7 +362,7 @@ class MyMoneyApp(tk.Tk):
         ttk.Button(actions, text=t("tx.change_category"), command=self._edit_selected).pack(side="left")
         ttk.Button(actions, text=t("tx.reset_category"),
                    command=self._clear_selected).pack(side="left", padx=6)
-        ttk.Label(actions, foreground=TEXT_MUTED, text=t("hint.transactions")).pack(side="left", padx=12)
+        ttk.Label(actions, foreground=colors().text_muted, text=t("hint.transactions")).pack(side="left", padx=12)
 
         self.tx_menu = tk.Menu(self, tearoff=False)
         self.tx_menu.add_command(label=t("tx.change_category"), command=self._edit_selected)
@@ -376,20 +370,30 @@ class MyMoneyApp(tk.Tk):
         self.tx_tree.bind("<Double-1>", lambda _: self._edit_selected())
         self.tx_tree.bind("<Button-3>", self._on_tx_right_click)
 
-    # ---------- γλώσσα ----------
+    # ---------- γλώσσα και θέμα ----------
 
     def _on_language(self):
         codes = {name: code for code, name in i18n.LANGUAGES.items()}
         language = codes[self.language_var.get()]
         if language == i18n.get_language():
             return
+        self._rebuild(lambda: i18n.set_language(language))
+        if self.settings_file is not None:
+            i18n.save_settings(self.settings_file)
+
+    def _toggle_theme(self):
+        name = "light" if theme.get_theme() == "dark" else "dark"
+        self._rebuild(lambda: (theme.set_theme(name), theme.apply(self)))
+        if self.settings_file is not None:
+            theme.save_settings(self.settings_file)
+
+    def _rebuild(self, change):
+        """Ξαναχτίζει το παράθυρο μετά το change(), κρατώντας φίλτρα και καρτέλα."""
         # Κρατάμε τις επιλογές φίλτρων σε μορφή ανεξάρτητη από τη γλώσσα.
         year, month = self._selected_year(), self._selected_month()
         bank = self._selected_bank()
         tab = self.notebook.index(self.notebook.select())
-        i18n.set_language(language)
-        if self.settings_file is not None:
-            i18n.save_settings(self.settings_file)
+        change()
         self._build_ui()
         self._update_filters(year, month, bank)
         self.refresh()
@@ -489,9 +493,9 @@ class MyMoneyApp(tk.Tk):
             x = range(len(labels))
             w = 0.38
             inc = ax.bar([i - w / 2 - 0.01 for i in x], [float(r[1]) for r in rows],
-                         width=w, color=INCOME, label=t("col.income"))
+                         width=w, color=colors().income, label=t("col.income"))
             exp = ax.bar([i + w / 2 + 0.01 for i in x], [float(r[2]) for r in rows],
-                         width=w, color=EXPENSE, label=t("col.expenses"))
+                         width=w, color=colors().expense, label=t("col.expenses"))
             for (label, income, _), b in zip(rows, inc):
                 chart.add_hover(b, f"{label}\n{t('hover.income', amount=fmt(income))}")
             for (label, _, expenses), b in zip(rows, exp):
@@ -501,8 +505,8 @@ class MyMoneyApp(tk.Tk):
             _euro_formatter(ax)
             top = max(max(r[1], r[2]) for r in rows)
             ax.set_ylim(0, float(top) * 1.2 or 1)
-            ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=TEXT_MUTED)
-            ax.set_title(title, loc="left", fontsize=11, color=TEXT)
+            ax.legend(frameon=False, loc="upper right", ncols=2, fontsize=9, labelcolor=colors().text_muted)
+            ax.set_title(title, loc="left", fontsize=11, color=colors().text)
         chart.draw()
 
     def _fill_years(self):
@@ -575,20 +579,20 @@ class MyMoneyApp(tk.Tk):
         chart = self.cat_chart
         ax = chart.new_axes()
         ax.grid(axis="y", visible=False)
-        ax.grid(axis="x", color=GRID, linewidth=0.8)
+        ax.grid(axis="x", color=colors().grid, linewidth=0.8)
         cats = list(reversed(s.expense_categories))
         if cats:
             bars = ax.barh([c.name for c in cats], [float(c.total) for c in cats],
-                           color=EXPENSE, height=0.6)
+                           color=colors().expense, height=0.6)
             for c, b in zip(cats, bars):
                 pct = c.total / s.expenses * 100
                 chart.add_hover(b, f"{c.name}\n" + t("hover.category", amount=fmt(c.total),
                                                       pct=f"{pct:.1f}", count=c.count))
                 ax.text(b.get_width(), b.get_y() + b.get_height() / 2, f"  {fmt(c.total)}",
-                        va="center", fontsize=8, color=TEXT_MUTED)
+                        va="center", fontsize=8, color=colors().text_muted)
             ax.set_xlim(0, max(float(cats[-1].total), 1) * 1.25)
             _euro_formatter(ax, "x")
-            ax.set_title(t("chart.categories"), loc="left", fontsize=11, color=TEXT)
+            ax.set_title(t("chart.categories"), loc="left", fontsize=11, color=colors().text)
         chart.draw()
 
     def _fill_daily(self):
@@ -597,16 +601,16 @@ class MyMoneyApp(tk.Tk):
         daily = self.stats.daily_expenses
         if daily:
             days = list(daily)
-            bars = ax.bar(days, [float(v) for v in daily.values()], color=EXPENSE, width=0.7)
+            bars = ax.bar(days, [float(v) for v in daily.values()], color=colors().expense, width=0.7)
             for d, b in zip(days, bars):
                 chart.add_hover(b, f"{d:%d/%m/%Y}\n{fmt(daily[d])}")
             avg = float(self.stats.avg_daily_expense)
-            ax.axhline(avg, color=TEXT_MUTED, linewidth=1, linestyle="--")
+            ax.axhline(avg, color=colors().text_muted, linewidth=1, linestyle="--")
             ax.text(days[0], avg, t("chart.average", amount=fmt(self.stats.avg_daily_expense)),
-                    va="bottom", fontsize=8, color=TEXT_MUTED)
+                    va="bottom", fontsize=8, color=colors().text_muted)
             ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%d/%m"))
             _euro_formatter(ax)
-            ax.set_title(t("chart.daily"), loc="left", fontsize=11, color=TEXT)
+            ax.set_title(t("chart.daily"), loc="left", fontsize=11, color=colors().text)
         chart.draw()
 
     def _fill_merchants(self):

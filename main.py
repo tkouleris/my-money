@@ -112,7 +112,10 @@ def main():
         print_report(year, month, args.bank)
         return
 
+    from mymoney import theme
     from mymoney.gui import MyMoneyApp
+
+    theme.load_settings(SETTINGS_FILE)
 
     app = MyMoneyApp(FILES_DIR, CATEGORIES_FILE, MANUAL_FILE, SETTINGS_FILE)
     app.mainloop()

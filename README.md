@@ -16,6 +16,7 @@ Everything runs locally. Your bank files never leave your computer.
 - Overlapping exports of the same bank are de-duplicated
 - A plain-text report for the terminal
 - Greek (default) and English interface
+- Light (default) and dark theme
 
 ## Supported banks
 
@@ -83,6 +84,10 @@ The choice is saved in `settings.json` and is used the next time the app starts,
 
 Category names come from `categories.json` and your manual choices, so they stay as you wrote them in either language.
 
+## Theme
+
+The app opens in the light theme. To switch, press the **☾ Dark** (**☾ Σκοτεινό**) button at the top right of the window, next to the language list; in the dark theme the same button reads **☀ Light** (**☀ Φωτεινό**) and switches back. The charts, tables and, on Windows 10/11, the title bar follow the theme. The window keeps your selected month, bank and tab, and the choice is saved in `settings.json`.
+
 ## Categories
 
 Transactions are categorised in this order:
@@ -114,9 +119,11 @@ mymoney/categories.py    keyword and manual categorisation
 mymoney/stats.py         statistics
 mymoney/gui.py           Tkinter + matplotlib interface
 mymoney/i18n.py          Greek/English texts and amount formatting
+mymoney/theme.py         light/dark colours and widget styles
+mymoney/settings.py      reading and writing settings.json
 categories.json          category keyword rules
 manual_categories.json   your manual category choices (not committed)
-settings.json            your language choice (not committed)
+settings.json            your language and theme choice (not committed)
 ```
 
 ## Privacy

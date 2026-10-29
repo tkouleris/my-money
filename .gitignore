@@ -22,7 +22,7 @@ desktop.ini
 # (οι εξαγωγές των τραπεζών εξαιρούνται από το files/.gitignore)
 manual_categories.json
 
-# Ρυθμίσεις χρήστη (γλώσσα)
+# Ρυθμίσεις χρήστη (γλώσσα, θέμα)
 settings.json
 
 # Προσωρινά αρχεία Excel
