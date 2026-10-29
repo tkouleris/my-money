@@ -20,7 +20,7 @@ STRINGS = {
     "bank.piraeus": ("Πειραιώς", "Piraeus Bank"),
 
     # Γραμμή εργαλείων
-    "app.title": ("MyMoney — Έσοδα & Έξοδα", "MyMoney — Income & Expenses"),
+    "app.title": ("Οι παράδες μου — Έσοδα & Έξοδα", "MyMoney — Income & Expenses"),
     "toolbar.year": ("Έτος:", "Year:"),
     "toolbar.month": ("Μήνας:", "Month:"),
     "toolbar.bank": ("Τράπεζα:", "Bank:"),
