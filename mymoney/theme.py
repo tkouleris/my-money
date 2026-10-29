@@ -72,6 +72,12 @@ def apply(root: tk.Tk):
     style = ttk.Style(root)
     if _theme == "light" and "vista" in style.theme_names():
         style.theme_use("vista")  # εγγενής εμφάνιση των Windows
+        # Λίστα με εικονίδια (IconDropdown) που μοιάζει με Combobox.
+        style.layout("Dropdown.TMenubutton", [("Combobox.border", {"sticky": "nswe", "children": [
+            ("Combobox.rightdownarrow", {"side": "right", "sticky": "ns"}),
+            ("Combobox.padding", {"sticky": "nswe", "children": [
+                ("Menubutton.label", {"side": "left", "sticky": "w"})]})]})])
+        style.configure("Dropdown.TMenubutton", padding=(3, 1))
     else:
         # Το vista δεν δέχεται δικά του χρώματα, οπότε το σκοτεινό θέμα χτίζεται πάνω στο clam.
         style.theme_use("clam")
@@ -81,10 +87,11 @@ def apply(root: tk.Tk):
                         selectforeground=p.select_text, insertcolor=p.text, arrowcolor=p.text)
         style.map(".", background=[("disabled", p.surface), ("active", p.hover)],
                   foreground=[("disabled", p.text_muted)])
-        style.configure("TButton", background=p.card, padding=(10, 3))
+        style.configure("TButton", background=p.card, padding=(8, 3))
         style.map("TButton", background=[("pressed", p.border), ("active", p.hover)])
         style.map("TCombobox", fieldbackground=[("readonly", p.field)],
                   selectbackground=[("readonly", p.field)], selectforeground=[("readonly", p.text)])
+        style.configure("TMenubutton", background=p.field, padding=(4, 1))
         style.configure("TCheckbutton", indicatorbackground=p.field, indicatorforeground=p.text)
         style.map("TCheckbutton", indicatorbackground=[("disabled", p.surface)])
         style.configure("TNotebook", background=p.surface, bordercolor=p.border)

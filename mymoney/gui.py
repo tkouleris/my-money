@@ -1,6 +1,7 @@
 """Desktop εφαρμογή (Tkinter + matplotlib) για στατιστικά εσόδων/εξόδων."""
 
 import os
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -19,6 +20,9 @@ from .i18n import bank_label, fmt_money, month_name, t  # noqa: E402
 from .loader import bank_folders, data_files, load_banks, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
 from .theme import palette as colors  # noqa: E402
+
+# Λογότυπα τραπεζών 20x20: assets/banks/<όνομα φακέλου>.png
+BANK_LOGOS = Path(__file__).resolve().parent / "assets" / "banks"
 
 def _style_axes(ax):
     ax.set_facecolor(colors().surface)
@@ -103,6 +107,76 @@ def make_tree(master, columns, widths, anchors=None):
     return frame, tree
 
 
+class IconDropdown(ttk.Menubutton):
+    """Λίστα επιλογής με εικονίδιο σε κάθε επιλογή.
+
+    Το Combobox δεν δείχνει εικόνες και τα μενού των Windows αγνοούν τα χρώματα του
+    θέματος, οπότε η λίστα είναι ένα Treeview σε αναδυόμενο παράθυρο."""
+
+    def __init__(self, master, command, width=18):
+        self.var = tk.StringVar()
+        super().__init__(master, textvariable=self.var, compound="left", width=width,
+                         style="Dropdown.TMenubutton")
+        self.command = command  # καλείται με την τιμή που διάλεξε ο χρήστης
+        self.items = []  # (τιμή, κείμενο, εικονίδιο)
+        self.value = None
+        self._popup = None
+        self._closed_at = 0.0  # για να μην ξανανοίγει με το ίδιο κλικ που την έκλεισε
+        self.bind("<Button-1>", self._toggle)
+        self.bind("<Down>", self._toggle)
+
+    def set_items(self, items):
+        self.items = list(items)
+
+    def set(self, value):
+        for item_value, label, icon in self.items:
+            if item_value == value:
+                self.value = value
+                self.var.set(label)
+                self.configure(image=icon)
+                return
+
+    def _toggle(self, _event):
+        if self._popup is not None:
+            self._close()
+        elif time.monotonic() - self._closed_at > 0.2:
+            self._open()
+        return "break"
+
+    def _open(self):
+        top = self._popup = tk.Toplevel(self)
+        top.overrideredirect(True)
+        top.attributes("-topmost", True)
+        tree = ttk.Treeview(top, show="tree", selectmode="browse", height=len(self.items))
+        tree.column("#0", width=max(self.winfo_width(), 180))
+        for i, (value, label, icon) in enumerate(self.items):
+            tree.insert("", "end", iid=str(i), text=f" {label}", image=icon)
+            if value == self.value:
+                tree.selection_set(str(i))
+                tree.focus(str(i))
+        tree.pack(fill="both", expand=True)
+        top.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
+        tree.bind("<ButtonRelease-1>", lambda e: self._choose(tree.identify_row(e.y)))
+        tree.bind("<Return>", lambda _: self._choose(tree.focus()))
+        tree.bind("<Escape>", lambda _: self._close())
+        tree.bind("<FocusOut>", lambda _: self._close())
+        tree.focus_force()
+
+    def _close(self):
+        if self._popup is not None:
+            self._popup.destroy()
+            self._popup = None
+            self._closed_at = time.monotonic()
+
+    def _choose(self, iid):
+        if not iid:
+            return
+        value = self.items[int(iid)][0]
+        self._close()
+        self.set(value)
+        self.command(value)
+
+
 class CategoryDialog(tk.Toplevel):
     """Παράθυρο επιλογής κατηγορίας για μία ή περισσότερες κινήσεις."""
 
@@ -182,6 +256,8 @@ class MyMoneyApp(tk.Tk):
         self.stats: Stats | None = None
         self.bank_stats: dict[str, Stats] = {}
         self.transfers = []  # μεταφορές μεταξύ τραπεζών της τρέχουσας περιόδου
+        self._bank: str | None = None  # επιλεγμένη τράπεζα (όνομα φακέλου) ή None για όλες
+        self._bank_icons: dict[str, tk.PhotoImage] = {}
 
         self._build_ui()
         self.reload()
@@ -224,10 +300,8 @@ class MyMoneyApp(tk.Tk):
         self.month_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
         ttk.Label(bar, text=t("toolbar.bank")).pack(side="left")
-        self.bank_var = tk.StringVar(value=t("all_banks"))
-        self.bank_box = ttk.Combobox(bar, textvariable=self.bank_var, state="readonly", width=18)
+        self.bank_box = IconDropdown(bar, command=self._select_bank, width=16)
         self.bank_box.pack(side="left", padx=(6, 16))
-        self.bank_box.bind("<<ComboboxSelected>>", lambda _: self.refresh())
 
         ttk.Button(bar, text=t("toolbar.reload"), command=self.reload).pack(side="left")
         ttk.Button(bar, text=t("toolbar.folder"), command=self._open_folder).pack(side="left", padx=6)
@@ -424,8 +498,24 @@ class MyMoneyApp(tk.Tk):
         self.month_var.set(month_name(month) if month in self._months else t("all_months"))
 
     def _selected_bank(self) -> str | None:
-        labels = {bank_label(b): b for b in self.banks}
-        return labels.get(self.bank_var.get())
+        return self._bank
+
+    def _select_bank(self, bank: str | None):
+        self._bank = bank
+        self.bank_box.set(bank)
+        self.refresh()
+
+    def _bank_icon(self, bank: str | None) -> tk.PhotoImage:
+        """Λογότυπο της τράπεζας, ή κενό εικονίδιο ίδιου μεγέθους ώστε να στοιχίζονται τα ονόματα."""
+        key = bank.casefold() if bank else ""
+        if key not in self._bank_icons:
+            path = BANK_LOGOS / f"{key}.png"
+            try:
+                icon = tk.PhotoImage(master=self, file=path) if key and path.exists() else None
+            except tk.TclError:  # χαλασμένο αρχείο εικόνας
+                icon = None
+            self._bank_icons[key] = icon or tk.PhotoImage(master=self, width=20, height=20)
+        return self._bank_icons[key]
 
     def reload(self):
         year, month, bank = self._selected_year(), self._selected_month(), self._selected_bank()
@@ -447,8 +537,10 @@ class MyMoneyApp(tk.Tk):
         self.year_box["values"] = [t("all_years"), *years]
         self.year_var.set(year if year in years else t("all_years"))
         self._update_months(month)
-        self.bank_box["values"] = [t("all_banks"), *map(bank_label, self.banks)]
-        self.bank_var.set(bank_label(bank) if bank in self.banks else t("all_banks"))
+        self.bank_box.set_items((b, bank_label(b) if b else t("all_banks"), self._bank_icon(b))
+                                for b in [None, *self.banks])
+        self._bank = bank if bank in self.banks else None
+        self.bank_box.set(self._bank)
 
     def refresh(self):
         year, month = self._selected_year(), self._selected_month()
@@ -562,9 +654,8 @@ class MyMoneyApp(tk.Tk):
         if not sel:
             return
         name = self.bank_tree.item(sel[0], "values")[0]
-        labels = [bank_label(b) for b in self.banks]
-        self.bank_var.set(name if name in labels else t("all_banks"))
-        self.refresh()
+        banks = {bank_label(b): b for b in self.banks}
+        self._select_bank(banks.get(name))
 
     def _fill_categories(self):
         s = self.stats

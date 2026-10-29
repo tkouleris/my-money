@@ -108,7 +108,8 @@ When a debit in one bank matches a credit in another bank, the app treats the pa
 
 1. Create a folder under `files/` (e.g. `files/alphabank`) and put the exports there.
 2. Optionally give it a display name in both languages by adding a `bank.<folder>` entry (e.g. `bank.alphabank`) to `STRINGS` in `mymoney/i18n.py`.
-3. If the export format is new, add a row parser next to `_nbg_row` / `_piraeus_row` in `mymoney/loader.py` and detect it by its column headers in `load_xlsx` (or add a CSV loader).
+3. Optionally add its logo as a 20×20 PNG at `mymoney/assets/banks/<folder>.png` (e.g. `alphabank.png`). It is shown next to the bank's name in the bank list. Banks without a logo are listed without one.
+4. If the export format is new, add a row parser next to `_nbg_row` / `_piraeus_row` in `mymoney/loader.py` and detect it by its column headers in `load_xlsx` (or add a CSV loader).
 
 ## Project structure
 
@@ -121,6 +122,7 @@ mymoney/gui.py           Tkinter + matplotlib interface
 mymoney/i18n.py          Greek/English texts and amount formatting
 mymoney/theme.py         light/dark colours and widget styles
 mymoney/settings.py      reading and writing settings.json
+mymoney/assets/banks/    bank logos for the bank list
 categories.json          category keyword rules
 manual_categories.json   your manual category choices (not committed)
 settings.json            your language and theme choice (not committed)
