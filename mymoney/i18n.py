@@ -26,8 +26,9 @@ STRINGS = {
     "toolbar.bank": ("Τράπεζα:", "Bank:"),
     "theme.to_dark": ("☾ Σκοτεινό", "☾ Dark"),
     "theme.to_light": ("☀ Φωτεινό", "☀ Light"),
-    "toolbar.import": ("📥 Εισαγωγή αρχείων…", "📥 Import files…"),
-    "toolbar.imports": ("🗂 Εισαγωγές", "🗂 Imports"),
+    # Μόνο σύμβολα από το BMP: τα emoji δεν υπάρχουν παντού στο Linux.
+    "toolbar.import": ("⇩ Εισαγωγή αρχείων…", "⇩ Import files…"),
+    "toolbar.imports": ("☰ Εισαγωγές", "☰ Imports"),
     "toolbar.reload": ("⟳ Επαναφόρτωση", "⟳ Reload"),
     "toolbar.categories": ("✎ Κατηγορίες", "✎ Categories"),
     "status": ("{banks} τράπεζες · {files} αρχεία · {count} κινήσεις",
@@ -176,6 +177,10 @@ STRINGS = {
                                "this file has already been imported (bank: {bank})"),
     "error.migrate_manual": ("Οι επιλογές του {file} δεν μεταφέρθηκαν στη βάση: {error}",
                              "The choices in {file} were not moved to the database: {error}"),
+    "error.no_tkinter": ("Το παράθυρο χρειάζεται το Tkinter, που λείπει από αυτή την Python. "
+                         "Στο Debian/Ubuntu εγκαθίσταται με: sudo apt install python3-tk",
+                         "The window needs Tkinter, which this Python does not have. "
+                         "On Debian/Ubuntu, install it with: sudo apt install python3-tk"),
 
     # Αναφορά τερματικού
     "cli.description": ("Στατιστικά εσόδων/εξόδων", "Income/expense statistics"),

@@ -32,15 +32,29 @@ The app tells the two `.xlsx` formats apart by their column headers, so the file
 
 ## Requirements
 
-- Python 3.10 or newer
-- Windows for `run.bat`. The app itself uses Tkinter, so it also runs on other platforms with `python main.py`.
+- Python 3.10 or newer, with Tkinter
+- Windows or Linux
 
 ## Setup
+
+On Windows:
 
 ```bat
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
+
+On Linux, Tkinter and `venv` are usually separate packages, so install them first. On Debian and Ubuntu:
+
+```sh
+sudo apt install python3-venv python3-tk
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+The package is `python3-tkinter` on Fedora and `tk` on Arch.
+
+The commands in the rest of this README use the Windows paths. On Linux, replace `.venv\Scripts\python` with `.venv/bin/python`.
 
 ## Adding your data
 
@@ -59,7 +73,7 @@ You can also import from the terminal. The bank is detected from the format unle
 
 ## Running
 
-Double-click `run.bat`, or:
+Double-click `run.bat` on Windows or run `./run.sh` on Linux, or:
 
 ```bat
 .venv\Scripts\python main.py

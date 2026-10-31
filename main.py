@@ -154,8 +154,13 @@ def main():
         print_report(year, month, args.bank)
         return
 
-    from mymoney import theme
-    from mymoney.gui import MyMoneyApp
+    try:
+        from mymoney import theme
+        from mymoney.gui import MyMoneyApp
+    except ModuleNotFoundError as exc:
+        if exc.name != "tkinter":
+            raise
+        sys.exit(t("error.no_tkinter"))  # στο Linux είναι συνήθως ξεχωριστό πακέτο
 
     theme.load_settings(SETTINGS_FILE)
 

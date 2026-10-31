@@ -5,6 +5,7 @@
 
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import ttk
@@ -66,10 +67,20 @@ def save_settings(path: Path):
     settings.update(path, theme=_theme)
 
 
+def font(size: int, weight: str = "normal") -> tuple:
+    """Η γραμματοσειρά του συστήματος (Segoe UI στα Windows, συνήθως DejaVu Sans στο Linux)."""
+    return tkfont.nametofont("TkDefaultFont").actual("family"), size, weight
+
+
 def apply(root: tk.Tk):
     """Εφαρμόζει το τρέχον θέμα στα στυλ ttk (πριν χτιστούν τα widgets)."""
     p = palette()
     style = ttk.Style(root)
+    if sys.platform != "win32":
+        # Εκτός Windows η Tk ξεκινά από το 10 και η γραμματοσειρά είναι φαρδύτερη από τη
+        # Segoe UI, οπότε τα κείμενα δεν θα χωρούσαν στο ελάχιστο πλάτος του παραθύρου.
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            tkfont.nametofont(name).configure(size=9)
     if _theme == "light" and "vista" in style.theme_names():
         style.theme_use("vista")  # εγγενής εμφάνιση των Windows
         # Λίστα με εικονίδια (IconDropdown) που μοιάζει με Combobox.
@@ -106,8 +117,9 @@ def apply(root: tk.Tk):
         style.configure("Vertical.TScrollbar", background=p.card, bordercolor=p.surface)
     style.configure("Treeview", rowheight=24)
     style.configure("Card.TFrame", background=p.card, relief="solid", borderwidth=1)
-    style.configure("CardTitle.TLabel", background=p.card, foreground=p.text_muted, font=("Segoe UI", 9))
-    style.configure("CardValue.TLabel", background=p.card, foreground=p.text, font=("Segoe UI", 15, "bold"))
+    style.configure("CardTitle.TLabel", background=p.card, foreground=p.text_muted, font=font(9))
+    style.configure("CardValue.TLabel", background=p.card, foreground=p.text,
+                    font=font(15 if sys.platform == "win32" else 12, "bold"))
 
     # Λίστες των combobox και μενού δεν είναι widgets ttk.
     for pattern, bg in (("*TCombobox*Listbox", p.field), ("*Menu", p.card)):

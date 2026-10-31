@@ -103,8 +103,19 @@ def make_tree(master, columns, widths, anchors=None):
     scroll.pack(side="right", fill="y")
     tree.tag_configure("income", foreground=colors().income)
     tree.tag_configure("expense", foreground=colors().text)
-    tree.tag_configure("total", font=("Segoe UI", 9, "bold"))
+    tree.tag_configure("total", font=theme.font(9, "bold"))
     return frame, tree
+
+
+def run_modal(dialog: tk.Toplevel):
+    """Κάνει τον διάλογο modal και περιμένει να κλείσει.
+
+    Στο X11 το grab αποτυγχάνει αν το παράθυρο δεν έχει εμφανιστεί και το κουμπί του
+    ποντικιού είναι ακόμα πατημένο, όπως όταν ο διάλογος ανοίγει με διπλό κλικ."""
+    theme.style_title_bar(dialog)
+    dialog.wait_visibility()
+    dialog.grab_set()
+    dialog.wait_window()
 
 
 class IconDropdown(ttk.Menubutton):
@@ -159,8 +170,22 @@ class IconDropdown(ttk.Menubutton):
         tree.bind("<ButtonRelease-1>", lambda e: self._choose(tree.identify_row(e.y)))
         tree.bind("<Return>", lambda _: self._choose(tree.focus()))
         tree.bind("<Escape>", lambda _: self._close())
-        tree.bind("<FocusOut>", lambda _: self._close())
+        if sys.platform == "win32":
+            tree.bind("<FocusOut>", lambda _: self._close())
+        else:
+            # Στο X11 το κλικ έξω από τη λίστα δεν αλλάζει πάντα την εστίαση, οπότε
+            # χρειάζεται grab, όπως κάνει και το Combobox για τη δική του λίστα.
+            top.bind("<Button>", lambda e: self._close_if_outside(e, tree))
+            top.wait_visibility()
+            try:
+                top.grab_set_global()
+            except tk.TclError:  # το grab το κρατά άλλο πρόγραμμα
+                top.grab_set()
         tree.focus_force()
+
+    def _close_if_outside(self, event, tree):
+        if self.winfo_containing(event.x_root, event.y_root) is not tree:
+            self._close()
 
     def _close(self):
         if self._popup is not None:
@@ -220,9 +245,7 @@ class CategoryDialog(tk.Toplevel):
         self.bind("<Return>", lambda _: self._ok())
         self.bind("<Escape>", lambda _: self.destroy())
 
-        theme.style_title_bar(self)
-        self.grab_set()
-        self.wait_window()
+        run_modal(self)
 
     def _toggle_income(self):
         is_new = self.name_var.get().strip() not in self.categories
@@ -266,9 +289,7 @@ class ImportDialog(tk.Toplevel):
         self.bind("<Return>", lambda _: self._ok())
         self.bind("<Escape>", lambda _: self.destroy())
 
-        theme.style_title_bar(self)
-        self.grab_set()
-        self.wait_window()
+        run_modal(self)
 
     def _ok(self):
         result = [(path, bank_key(var.get(), self.banks)) for path, var in self.rows]
@@ -302,9 +323,7 @@ class ImportsDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _: self.destroy())
         self._fill()
 
-        theme.style_title_bar(self)
-        self.grab_set()
-        self.wait_window()
+        run_modal(self)
 
     def _fill(self):
         self.tree.delete(*self.tree.get_children())
@@ -382,7 +401,7 @@ class CategoriesDialog(tk.Toplevel):
         text_frame.pack(fill="both", expand=True, pady=(2, 0))
         # Το Text δεν είναι widget ttk, οπότε παίρνει τα χρώματα του θέματος απευθείας.
         self.keywords_text = tk.Text(
-            text_frame, width=30, height=10, wrap="none", font=("Segoe UI", 9), relief="solid", borderwidth=1,
+            text_frame, width=30, height=10, wrap="none", font=theme.font(9), relief="solid", borderwidth=1,
             bg=colors().field, fg=colors().text, insertbackground=colors().text,
             selectbackground=colors().select, selectforeground=colors().select_text,
             highlightthickness=0,
@@ -400,9 +419,7 @@ class CategoriesDialog(tk.Toplevel):
             self._show(int(children[0]))
             self.tree.selection_set(children[0])
 
-        theme.style_title_bar(self)
-        self.grab_set()
-        self.wait_window()
+        run_modal(self)
 
     def _fill(self):
         """Ξαναγεμίζει τη λίστα από τη βάση, κρατώντας την επιλογή."""
@@ -1027,8 +1044,10 @@ class MyMoneyApp(tk.Tk):
 
     def _on_tx_ctrl_key(self, event):
         """Ctrl+A: όλες οι κινήσεις που φαίνονται. Στα Windows ο κωδικός 65 είναι το φυσικό
-        πλήκτρο A, οπότε δουλεύει και με ελληνικό πληκτρολόγιο, όπου το ίδιο πλήκτρο δίνει α."""
-        if event.keysym in ("a", "A") or (sys.platform == "win32" and event.keycode == 65):
+        πλήκτρο A, οπότε δουλεύει και με ελληνικό πληκτρολόγιο, όπου το ίδιο πλήκτρο δίνει α.
+        Στο Linux το α φτάνει ως δικό του keysym."""
+        if (event.keysym in ("a", "A", "Greek_alpha", "Greek_ALPHA")
+                or (sys.platform == "win32" and event.keycode == 65)):
             self.tx_tree.selection_set(self.tx_tree.get_children())
             return "break"
 
@@ -1084,7 +1103,10 @@ class MyMoneyApp(tk.Tk):
         self.notebook.select(self.tx_tab)
 
     def _import_files(self):
-        patterns = " ".join(f"*{suffix}" for suffix in SUPPORTED_SUFFIXES)
+        suffixes = list(SUPPORTED_SUFFIXES)
+        if sys.platform != "win32":  # εκτός Windows το .CSV δεν ταιριάζει με το *.csv
+            suffixes += [suffix.upper() for suffix in suffixes]
+        patterns = " ".join(f"*{suffix}" for suffix in suffixes)
         names = filedialog.askopenfilenames(parent=self, title=t("import.title"),
                                             filetypes=[(t("import.filetype"), patterns)])
         if not names:
