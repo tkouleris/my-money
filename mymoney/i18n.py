@@ -77,6 +77,8 @@ STRINGS = {
     "col.date": ("Ημερομηνία", "Date"),
     "col.file": ("Αρχείο", "File"),
     "col.imported_at": ("Εισαγωγή", "Imported"),
+    "col.period": ("Περίοδος", "Period"),
+    "col.keywords": ("Λέξεις", "Keywords"),
     "total": ("Σύνολο", "Total"),
 
     # Υποδείξεις
@@ -90,9 +92,9 @@ STRINGS = {
                         "Double-click a category to see its transactions."),
     "hint.merchants": ("Διπλό κλικ για να βάλεις όλες τις κινήσεις του εμπόρου σε κατηγορία.",
                        "Double-click to put all of a merchant's transactions in a category."),
-    "hint.transactions": ("Ctrl/Shift + κλικ για πολλές κινήσεις · διπλό ή δεξί κλικ · "
+    "hint.transactions": ("Ctrl/Shift + κλικ για πολλές κινήσεις · Ctrl+A για όλες · διπλό ή δεξί κλικ · "
                           "✎ = χειροκίνητη κατηγορία",
-                          "Ctrl/Shift + click for multiple transactions · double or right click · "
+                          "Ctrl/Shift + click for multiple transactions · Ctrl+A for all · double or right click · "
                           "✎ = manual category"),
 
     # Κινήσεις
@@ -136,17 +138,35 @@ STRINGS = {
     "imports.confirm": ("Να διαγραφούν οι κινήσεις των αρχείων που διάλεξες από τη βάση;\n{files}",
                         "Delete the transactions of the selected files from the database?\n{files}"),
 
+    # Παράθυρο διαχείρισης κατηγοριών
+    "categories.title": ("Κατηγορίες", "Categories"),
+    "categories.add": ("Νέα", "New"),
+    "categories.delete": ("Διαγραφή", "Delete"),
+    "categories.up": ("▲", "▲"),
+    "categories.down": ("▼", "▼"),
+    "categories.close": ("Κλείσιμο", "Close"),
+    "categories.name": ("Όνομα:", "Name:"),
+    "categories.income": ("Κατηγορία εσόδων", "Income category"),
+    "categories.keywords": ("Λέξεις-κλειδιά (μία σε κάθε γραμμή):", "Keywords (one per line):"),
+    "categories.hint": ("Οι κατηγορίες ελέγχονται με τη σειρά της λίστας και τα κενά μέσα στις λέξεις μετράνε. "
+                        "Οι αλλαγές αποθηκεύονται αυτόματα.",
+                        "Categories are checked in list order, and spaces in keywords count. "
+                        "Changes are saved automatically."),
+    "categories.new_name": ("Νέα κατηγορία", "New category"),
+    "categories.confirm": ("Να διαγραφεί η κατηγορία «{name}»;\nΟι κινήσεις της θα γυρίσουν στην αυτόματη κατηγορία.",
+                           "Delete the category “{name}”?\nIts transactions will go back to their automatic category."),
+    "categories.name_empty": ("Το όνομα της κατηγορίας δεν μπορεί να είναι κενό.", "The category name cannot be empty."),
+    "categories.name_exists": ("Υπάρχει ήδη κατηγορία με το όνομα «{name}».",
+                               "A category named “{name}” already exists."),
+    "categories.system": ("Η κατηγορία «{name}» χρειάζεται στην εφαρμογή και δεν μπορεί να αλλάξει ή να διαγραφεί.",
+                          "The app needs the category “{name}”, so it cannot be changed or deleted."),
+
     # Μηνύματα
     "msg.error": ("Σφάλμα", "Error"),
     "msg.load_failed": ("Αποτυχία ανάγνωσης δεδομένων:\n{error}", "Could not read the data:\n{error}"),
     "msg.category": ("Κατηγορία", "Category"),
     "msg.select_first": ("Διάλεξε πρώτα μία ή περισσότερες κινήσεις.",
                          "Select one or more transactions first."),
-    "msg.categories": ("Κατηγορίες", "Categories"),
-    "msg.categories_reload": ("Αφού αποθηκεύσεις τις αλλαγές στο categories.json, "
-                              "πάτα «Επαναφόρτωση».",
-                              "After saving your changes to categories.json, "
-                              "press “Reload”."),
 
     # Σφάλματα ανάγνωσης
     "error.missing_columns": ("{file}: λείπουν οι στήλες {columns}", "{file}: missing columns {columns}"),
@@ -154,6 +174,8 @@ STRINGS = {
     "error.no_transactions": ("δεν βρέθηκαν κινήσεις στο αρχείο", "no transactions found in the file"),
     "error.already_imported": ("το αρχείο έχει ήδη εισαχθεί (τράπεζα: {bank})",
                                "this file has already been imported (bank: {bank})"),
+    "error.migrate_manual": ("Οι επιλογές του {file} δεν μεταφέρθηκαν στη βάση: {error}",
+                             "The choices in {file} were not moved to the database: {error}"),
 
     # Αναφορά τερματικού
     "cli.description": ("Στατιστικά εσόδων/εξόδων", "Income/expense statistics"),

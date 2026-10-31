@@ -21,9 +21,17 @@ from mymoney.i18n import bank_key, bank_label, period_label, t
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = BASE_DIR / "mymoney.db"
-CATEGORIES_FILE = BASE_DIR / "categories.json"
-MANUAL_FILE = BASE_DIR / "manual_categories.json"
+OLD_MANUAL_FILE = BASE_DIR / "manual_categories.json"  # μόνο για τη μεταφορά στη βάση
 SETTINGS_FILE = BASE_DIR / "settings.json"
+
+
+def migrate_manual_categories():
+    from mymoney.database import migrate_manual_file
+
+    try:
+        migrate_manual_file(DB_FILE, OLD_MANUAL_FILE)
+    except (OSError, ValueError) as exc:  # χαλασμένο αρχείο: η εφαρμογή ανοίγει και ξαναδοκιμάζει την επόμενη φορά
+        print(t("error.migrate_manual", file=OLD_MANUAL_FILE.name, error=exc), file=sys.stderr)
 
 
 def import_files(paths: list[str], bank: str | None):
@@ -56,7 +64,7 @@ def print_report(year: str | None, month: str | None, bank: str | None):
     if not txs:
         sys.exit(t("report.empty"))
     txs = [tx for tx in txs if tx.in_period(year, month)]
-    categorizer = Categorizer.from_file(CATEGORIES_FILE, MANUAL_FILE)
+    categorizer = Categorizer.from_db(DB_FILE)
     banks = sorted({tx.bank for tx in txs}, key=bank_label)
 
     if bank:
@@ -129,6 +137,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
 
+    migrate_manual_categories()
+
     if args.import_files:
         import_files(args.import_files, args.bank)
         return
@@ -149,7 +159,7 @@ def main():
 
     theme.load_settings(SETTINGS_FILE)
 
-    app = MyMoneyApp(DB_FILE, CATEGORIES_FILE, MANUAL_FILE, SETTINGS_FILE)
+    app = MyMoneyApp(DB_FILE, SETTINGS_FILE)
     app.mainloop()
 
 

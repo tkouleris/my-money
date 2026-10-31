@@ -1,6 +1,6 @@
 """Desktop εφαρμογή (Tkinter + matplotlib) για στατιστικά εσόδων/εξόδων."""
 
-import os
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -284,7 +284,7 @@ class ImportsDialog(tk.Toplevel):
         super().__init__(master)
         self.title(t("imports.title"))
         self.transient(master)
-        self.geometry("720x360")
+        self.geometry("880x360")
         self.db_file = db_file
         self.changed = False
 
@@ -295,8 +295,8 @@ class ImportsDialog(tk.Toplevel):
         ttk.Button(buttons, text=t("imports.close"), command=self.destroy).pack(side="right")
         ttk.Button(buttons, text=t("imports.delete"), command=self._delete).pack(side="left")
         frame, self.tree = make_tree(
-            body, ["col.file", "col.bank", "col.imported_at", "col.transactions"],
-            [300, 150, 130, 80], anchors={3: "e"},
+            body, ["col.file", "col.bank", "col.period", "col.imported_at", "col.transactions"],
+            [280, 140, 170, 120, 80], anchors={4: "e"},
         )
         frame.pack(fill="both", expand=True)
         self.bind("<Escape>", lambda _: self.destroy())
@@ -309,8 +309,11 @@ class ImportsDialog(tk.Toplevel):
     def _fill(self):
         self.tree.delete(*self.tree.get_children())
         for record in database.list_imports(self.db_file):
+            period = (f"{record.first_date:%d/%m/%Y} – {record.last_date:%d/%m/%Y}"
+                      if record.first_date else "-")
             self.tree.insert("", "end", iid=str(record.id), values=(
-                record.file_name, bank_label(record.bank), f"{record.imported_at:%d/%m/%Y %H:%M}", record.rows))
+                record.file_name, bank_label(record.bank), period,
+                f"{record.imported_at:%d/%m/%Y %H:%M}", record.rows))
 
     def _delete(self):
         selection = self.tree.selection()
@@ -325,13 +328,196 @@ class ImportsDialog(tk.Toplevel):
         self._fill()
 
 
+class CategoriesDialog(tk.Toplevel):
+    """Διαχείριση κατηγοριών: σειρά, όνομα, έσοδο/έξοδο και λέξεις-κλειδιά.
+
+    Οι αλλαγές της φόρμας αποθηκεύονται όταν ο χρήστης φεύγει από την κατηγορία
+    ή κλείνει το παράθυρο."""
+
+    def __init__(self, master, db_file: Path):
+        super().__init__(master)
+        self.title(t("categories.title"))
+        self.transient(master)
+        self.geometry("760x500")
+        self.minsize(640, 400)
+        self.db_file = db_file
+        self.changed = False
+        self.records: dict[int, database.CategoryRecord] = {}
+        self.current: int | None = None  # η κατηγορία που δείχνει η φόρμα
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        footer = ttk.Frame(body)
+        footer.pack(side="bottom", fill="x", pady=(10, 0))
+        ttk.Button(footer, text=t("categories.close"), command=self._close).pack(side="right")
+        ttk.Label(footer, text=t("categories.hint"), foreground=colors().text_muted,
+                  wraplength=580, justify="left").pack(side="left")
+
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True)
+        buttons = ttk.Frame(left)
+        buttons.pack(side="bottom", fill="x", pady=(6, 0))
+        ttk.Button(buttons, text=t("categories.add"), command=self._add).pack(side="left")
+        self.delete_button = ttk.Button(buttons, text=t("categories.delete"), command=self._delete)
+        self.delete_button.pack(side="left", padx=6)
+        ttk.Button(buttons, text=t("categories.down"), width=3, command=lambda: self._move(1)).pack(side="right")
+        ttk.Button(buttons, text=t("categories.up"), width=3,
+                   command=lambda: self._move(-1)).pack(side="right", padx=6)
+        frame, self.tree = make_tree(left, ["col.category", "col.keywords"], [220, 70], anchors={1: "e"})
+        self.tree.configure(selectmode="browse")
+        frame.pack(fill="both", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        form = ttk.Frame(body)
+        form.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        ttk.Label(form, text=t("categories.name")).pack(anchor="w")
+        self.name_var = tk.StringVar()
+        self.name_entry = ttk.Entry(form, textvariable=self.name_var)
+        self.name_entry.pack(fill="x", pady=(2, 8))
+        self.income_var = tk.BooleanVar()
+        self.income_check = ttk.Checkbutton(form, variable=self.income_var, text=t("categories.income"))
+        self.income_check.pack(anchor="w", pady=(0, 8))
+        ttk.Label(form, text=t("categories.keywords")).pack(anchor="w")
+        text_frame = ttk.Frame(form)
+        text_frame.pack(fill="both", expand=True, pady=(2, 0))
+        # Το Text δεν είναι widget ttk, οπότε παίρνει τα χρώματα του θέματος απευθείας.
+        self.keywords_text = tk.Text(
+            text_frame, width=30, height=10, wrap="none", font=("Segoe UI", 9), relief="solid", borderwidth=1,
+            bg=colors().field, fg=colors().text, insertbackground=colors().text,
+            selectbackground=colors().select, selectforeground=colors().select_text,
+            highlightthickness=0,
+        )
+        scroll = ttk.Scrollbar(text_frame, orient="vertical", command=self.keywords_text.yview)
+        self.keywords_text.configure(yscrollcommand=scroll.set)
+        self.keywords_text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self.bind("<Escape>", lambda _: self._close())
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._fill()
+        children = self.tree.get_children()
+        if children:
+            self._show(int(children[0]))
+            self.tree.selection_set(children[0])
+
+        theme.style_title_bar(self)
+        self.grab_set()
+        self.wait_window()
+
+    def _fill(self):
+        """Ξαναγεμίζει τη λίστα από τη βάση, κρατώντας την επιλογή."""
+        self.records = {record.id: record for record in database.load_categories(self.db_file)}
+        self.tree.delete(*self.tree.get_children())
+        for record in self.records.values():
+            self.tree.insert("", "end", iid=str(record.id), values=(record.name, len(record.keywords)),
+                             tags=("income",) if record.is_income else ())
+        if self.current in self.records:
+            self.tree.selection_set(str(self.current))
+            self.tree.see(str(self.current))
+
+    def _on_select(self, _event):
+        selection = self.tree.selection()
+        selected = int(selection[0]) if selection else None
+        if selected == self.current:
+            return
+        if not self._save_form():
+            self.tree.selection_set(str(self.current))  # μένει στην κατηγορία με το σφάλμα
+            return
+        self._show(selected)
+        if selected is not None:  # το _fill της αποθήκευσης ξαναδιάλεξε την προηγούμενη
+            self.tree.selection_set(str(selected))
+
+    def _show(self, category_id: int | None):
+        self.current = category_id
+        record = self.records.get(category_id)
+        self.name_var.set(record.name if record else "")
+        self.income_var.set(record.is_income if record else False)
+        self.keywords_text.delete("1.0", "end")
+        if record:
+            self.keywords_text.insert("1.0", "\n".join(record.keywords))
+        editable = ["!disabled"] if record and not record.is_system else ["disabled"]
+        self.name_entry.state(editable)
+        self.income_check.state(editable)
+        self.delete_button.state(editable)
+
+    def _form_keywords(self) -> list[str]:
+        # Χωρίς strip: τα κενά στις λέξεις-κλειδιά μετράνε στο ταίριασμα.
+        return [line for line in self.keywords_text.get("1.0", "end-1c").split("\n") if line.strip()]
+
+    def _save_form(self) -> bool:
+        """Αποθηκεύει ό,τι άλλαξε στη φόρμα· False αν απέτυχε (π.χ. όνομα που υπάρχει ήδη)."""
+        record = self.records.get(self.current)
+        if record is None:
+            return True
+        name, keywords = self.name_var.get().strip(), self._form_keywords()
+        is_income = self.income_var.get()
+        if name == record.name and is_income == record.is_income and keywords == record.keywords:
+            return True
+        try:
+            if name != record.name:
+                database.rename_category(self.db_file, record.id, name)
+            if is_income != record.is_income:
+                database.set_category_income(self.db_file, record.id, is_income)
+            if keywords != record.keywords:
+                database.set_keywords(self.db_file, record.id, keywords)
+        except ValueError as exc:
+            messagebox.showerror(t("msg.error"), str(exc), parent=self)
+            return False
+        self.changed = True
+        self._fill()
+        return True
+
+    def _add(self):
+        if not self._save_form():
+            return
+        base = t("categories.new_name")
+        names = {record.name for record in self.records.values()}
+        name, number = base, 1
+        while name in names:
+            number += 1
+            name = f"{base} {number}"
+        new_id = database.add_category(self.db_file, name)
+        self.changed = True
+        self._fill()
+        self._show(new_id)
+        self.tree.selection_set(str(new_id))
+        self.tree.see(str(new_id))
+        self.name_entry.focus_set()
+        self.name_entry.select_range(0, "end")
+
+    def _delete(self):
+        record = self.records.get(self.current)
+        if record is None or record.is_system:
+            return
+        if not messagebox.askyesno(t("categories.title"), t("categories.confirm", name=record.name), parent=self):
+            return
+        database.delete_category(self.db_file, record.id)
+        self.changed = True
+        children = self.tree.get_children()
+        index = children.index(str(record.id))
+        neighbour = children[index + 1] if index + 1 < len(children) else children[index - 1] if index else None
+        self.current = None  # για να μην ξαναγραφτεί η φόρμα στην κατηγορία που διαγράφηκε
+        self._fill()
+        self._show(int(neighbour) if neighbour else None)
+        if neighbour:
+            self.tree.selection_set(neighbour)
+
+    def _move(self, step: int):
+        if self.current is None or not self._save_form():
+            return
+        database.move_category(self.db_file, self.current, step)
+        self.changed = True
+        self._fill()
+
+    def _close(self):
+        if self._save_form():
+            self.destroy()
+
+
 class MyMoneyApp(tk.Tk):
-    def __init__(self, db_file: Path, categories_file: Path, manual_file: Path,
-                 settings_file: Path | None = None):
+    def __init__(self, db_file: Path, settings_file: Path | None = None):
         super().__init__()
         self.db_file = db_file
-        self.categories_file = categories_file
-        self.manual_file = manual_file
         self.settings_file = settings_file
         self.tx_items = {}  # iid του πίνακα κινήσεων -> Transaction
         self.geometry("1150x780")
@@ -536,6 +722,7 @@ class MyMoneyApp(tk.Tk):
         self.tx_menu.add_command(label=t("tx.reset_category"), command=self._clear_selected)
         self.tx_tree.bind("<Double-1>", lambda _: self._edit_selected())
         self.tx_tree.bind("<Button-3>", self._on_tx_right_click)
+        self.tx_tree.bind("<Control-KeyPress>", self._on_tx_ctrl_key)
 
     # ---------- γλώσσα και θέμα ----------
 
@@ -615,7 +802,7 @@ class MyMoneyApp(tk.Tk):
         try:
             self.all_transactions = database.load_transactions(self.db_file)
             self.imports = database.list_imports(self.db_file)
-            self.categorizer = Categorizer.from_file(self.categories_file, self.manual_file)
+            self.categorizer = Categorizer.from_db(self.db_file)
         except Exception as exc:  # εμφάνιση σφάλματος αντί για crash
             messagebox.showerror(t("msg.error"), t("msg.load_failed", error=exc))
             return
@@ -838,6 +1025,13 @@ class MyMoneyApp(tk.Tk):
     def _selected_transactions(self):
         return [self.tx_items[iid] for iid in self.tx_tree.selection() if iid in self.tx_items]
 
+    def _on_tx_ctrl_key(self, event):
+        """Ctrl+A: όλες οι κινήσεις που φαίνονται. Στα Windows ο κωδικός 65 είναι το φυσικό
+        πλήκτρο A, οπότε δουλεύει και με ελληνικό πληκτρολόγιο, όπου το ίδιο πλήκτρο δίνει α."""
+        if event.keysym in ("a", "A") or (sys.platform == "win32" and event.keycode == 65):
+            self.tx_tree.selection_set(self.tx_tree.get_children())
+            return "break"
+
     def _on_tx_right_click(self, event):
         row = self.tx_tree.identify_row(event.y)
         if row and row not in self.tx_tree.selection():
@@ -927,6 +1121,5 @@ class MyMoneyApp(tk.Tk):
             self.reload()
 
     def _open_categories(self):
-        if self.categories_file.exists():
-            os.startfile(self.categories_file)
-            messagebox.showinfo(t("msg.categories"), t("msg.categories_reload"))
+        if CategoriesDialog(self, self.db_file).changed:
+            self.reload()

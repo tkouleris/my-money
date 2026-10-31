@@ -1,11 +1,17 @@
-"""Βάση δεδομένων SQLite με τις κινήσεις που εισάγει ο χρήστης από τα αρχεία των τραπεζών.
+"""Βάση δεδομένων SQLite με τις κινήσεις που εισάγει ο χρήστης από τα αρχεία των τραπεζών
+και τις κατηγορίες τους.
 
 Κάθε εισαγωγή κρατά όλες τις γραμμές του αρχείου της. Οι κινήσεις που υπάρχουν σε
 δύο αρχεία της ίδιας τράπεζας αφαιρούνται κατά την ανάγνωση (merge_files), ώστε η
 διαγραφή μιας εισαγωγής να επαναφέρει τις γραμμές που είχε «κρύψει» από άλλο αρχείο.
+
+Οι χειροκίνητες κατηγορίες κρατιούνται με κλειδί το tx_key και όχι ως στήλη των γραμμών,
+ώστε να ισχύουν για τη γραμμή οποιουδήποτε αρχείου και να μη χάνονται με τη διαγραφή
+μιας εισαγωγής.
 """
 
 import hashlib
+import json
 import sqlite3
 from collections import defaultdict
 from contextlib import contextmanager
@@ -14,8 +20,13 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+from .default_categories import DEFAULT_CATEGORIES, SYSTEM_CATEGORIES
 from .i18n import t
 from .loader import Transaction, load_file, merge_files
+
+# PRAGMA user_version: 1 = έχουν μπει οι αρχικές κατηγορίες, 2 = έχει μεταφερθεί και το manual_categories.json
+VERSION_SEEDED = 1
+VERSION_MANUAL_MIGRATED = 2
 
 # Τα ποσά αποθηκεύονται ως κείμενο, ώστε το Decimal (και άρα το tx_key) να μένει ακριβώς ίδιο.
 SCHEMA = """
@@ -36,6 +47,27 @@ CREATE TABLE IF NOT EXISTS transactions (
     balance TEXT
 );
 CREATE INDEX IF NOT EXISTS transactions_import ON transactions(import_id);
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    is_income INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS category_keywords (
+    id INTEGER PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    keyword TEXT NOT NULL,
+    position INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS category_keywords_category ON category_keywords(category_id);
+CREATE TABLE IF NOT EXISTS manual_transactions (
+    tx_key TEXT PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS manual_descriptions (
+    description TEXT PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE
+);
 """
 
 
@@ -46,6 +78,8 @@ class ImportRecord:
     bank: str
     imported_at: datetime
     rows: int
+    first_date: date | None  # η περίοδος που καλύπτουν οι γραμμές της εισαγωγής
+    last_date: date | None
 
 
 @dataclass(frozen=True)
@@ -56,16 +90,54 @@ class ImportResult:
     added: int  # νέες κινήσεις, χωρίς όσες υπήρχαν ήδη σε άλλο αρχείο της τράπεζας
 
 
+@dataclass(frozen=True)
+class CategoryRecord:
+    id: int
+    name: str
+    is_income: bool
+    keywords: list[str]
+
+    @property
+    def is_system(self) -> bool:
+        return self.name in SYSTEM_CATEGORIES
+
+
 @contextmanager
 def _connect(path: Path):
     conn = sqlite3.connect(path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(SCHEMA)
+        _seed_categories(conn)
         with conn:  # commit στο τέλος, rollback σε σφάλμα
             yield conn
     finally:
         conn.close()
+
+
+def _version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _seed_categories(conn: sqlite3.Connection):
+    """Οι αρχικές κατηγορίες μπαίνουν μία φορά, ώστε όσες σβήσει ο χρήστης να μην ξαναγυρίζουν."""
+    if _version(conn) >= VERSION_SEEDED:
+        return
+    with conn:
+        for position, (name, is_income, keywords) in enumerate(DEFAULT_CATEGORIES):
+            category_id = conn.execute(
+                "INSERT INTO categories (name, is_income, position) VALUES (?, ?, ?)",
+                (name, is_income, position),
+            ).lastrowid
+            _insert_keywords(conn, category_id, keywords)
+        conn.execute(f"PRAGMA user_version = {VERSION_SEEDED}")
+
+
+def _insert_keywords(conn: sqlite3.Connection, category_id: int, keywords: list[str]):
+    conn.executemany(
+        "INSERT INTO category_keywords (category_id, keyword, position) VALUES (?, ?, ?)",
+        [(category_id, keyword, position) for position, keyword in enumerate(keywords)],
+    )
 
 
 def load_transactions(db_path: Path) -> list[Transaction]:
@@ -127,15 +199,170 @@ def list_imports(db_path: Path) -> list[ImportRecord]:
     """Οι εισαγωγές που έχουν γίνει, οι νεότερες πρώτες."""
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT i.id, i.file_name, i.bank, i.imported_at, COUNT(t.id) "
+            "SELECT i.id, i.file_name, i.bank, i.imported_at, COUNT(t.id), MIN(t.date), MAX(t.date) "
             "FROM imports i LEFT JOIN transactions t ON t.import_id = i.id "
             "GROUP BY i.id ORDER BY i.id DESC"
         ).fetchall()
-    return [ImportRecord(id_, name, bank, datetime.fromisoformat(at), count)
-            for id_, name, bank, at, count in rows]
+    return [ImportRecord(id_, name, bank, datetime.fromisoformat(at), count,
+                         date.fromisoformat(first) if first else None,
+                         date.fromisoformat(last) if last else None)
+            for id_, name, bank, at, count, first, last in rows]
 
 
 def delete_import(db_path: Path, import_id: int):
-    """Διαγράφει μία εισαγωγή μαζί με τις γραμμές της."""
+    """Διαγράφει μία εισαγωγή μαζί με τις γραμμές της. Οι χειροκίνητες κατηγορίες μένουν,
+    ώστε να ισχύουν και για τις ίδιες κινήσεις άλλων αρχείων ή αν ξαναγίνει η εισαγωγή."""
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM imports WHERE id = ?", (import_id,))
+
+
+# ---------- κατηγορίες ----------
+
+def load_categories(db_path: Path) -> list[CategoryRecord]:
+    """Οι κατηγορίες με τη σειρά τους, που είναι και η σειρά ελέγχου των λέξεων-κλειδιών."""
+    with _connect(db_path) as conn:
+        categories = conn.execute("SELECT id, name, is_income FROM categories ORDER BY position, id").fetchall()
+        keywords = defaultdict(list)
+        for category_id, keyword in conn.execute(
+                "SELECT category_id, keyword FROM category_keywords ORDER BY position, id"):
+            keywords[category_id].append(keyword)
+    return [CategoryRecord(id_, name, bool(is_income), keywords[id_]) for id_, name, is_income in categories]
+
+
+def load_manual(db_path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Οι χειροκίνητες επιλογές: (tx_key -> κατηγορία, περιγραφή -> κατηγορία)."""
+    with _connect(db_path) as conn:
+        by_transaction = conn.execute(
+            "SELECT m.tx_key, c.name FROM manual_transactions m JOIN categories c ON c.id = m.category_id"
+        ).fetchall()
+        by_description = conn.execute(
+            "SELECT m.description, c.name FROM manual_descriptions m JOIN categories c ON c.id = m.category_id"
+        ).fetchall()
+    return dict(by_transaction), dict(by_description)
+
+
+def _category_id(conn: sqlite3.Connection, name: str, income: bool = False) -> int:
+    """Το id της κατηγορίας· αν δεν υπάρχει, τη δημιουργεί στο τέλος της λίστας."""
+    row = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    if row:
+        if income:
+            conn.execute("UPDATE categories SET is_income = 1 WHERE id = ?", (row[0],))
+        return row[0]
+    return conn.execute(
+        "INSERT INTO categories (name, is_income, position) "
+        "VALUES (?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM categories))",
+        (name, income),
+    ).lastrowid
+
+
+def _set_manual(conn: sqlite3.Connection, tx_keys, descriptions, category_id: int):
+    conn.executemany("INSERT OR REPLACE INTO manual_transactions (tx_key, category_id) VALUES (?, ?)",
+                     [(key, category_id) for key in tx_keys])
+    conn.executemany("INSERT OR REPLACE INTO manual_descriptions (description, category_id) VALUES (?, ?)",
+                     [(description, category_id) for description in descriptions])
+
+
+def _clear_transactions(conn: sqlite3.Connection, tx_keys):
+    conn.executemany("DELETE FROM manual_transactions WHERE tx_key = ?", [(key,) for key in tx_keys])
+
+
+def assign_transactions(db_path: Path, tx_keys: list[str], category: str, income: bool = False):
+    """Βάζει τις συγκεκριμένες κινήσεις στην κατηγορία, όλες μαζί ή καμία."""
+    with _connect(db_path) as conn:
+        _set_manual(conn, tx_keys, (), _category_id(conn, category, income))
+
+
+def assign_descriptions(db_path: Path, descriptions: list[str], tx_keys: list[str], category: str,
+                        income: bool = False):
+    """Βάζει όλες τις κινήσεις με αυτές τις περιγραφές στην κατηγορία· οι επιλογές
+    των tx_keys καταργούνται, γιατί θα είχαν προτεραιότητα."""
+    with _connect(db_path) as conn:
+        _set_manual(conn, (), descriptions, _category_id(conn, category, income))
+        _clear_transactions(conn, tx_keys)
+
+
+def clear_manual(db_path: Path, tx_keys: list[str], descriptions: list[str]):
+    """Καταργεί τις χειροκίνητες επιλογές, ώστε να ισχύει ξανά η αυτόματη κατηγορία."""
+    with _connect(db_path) as conn:
+        _clear_transactions(conn, tx_keys)
+        conn.executemany("DELETE FROM manual_descriptions WHERE description = ?",
+                         [(description,) for description in descriptions])
+
+
+def _check_new_name(conn: sqlite3.Connection, name: str):
+    if not name:
+        raise ValueError(t("categories.name_empty"))
+    if conn.execute("SELECT 1 FROM categories WHERE name = ?", (name,)).fetchone():
+        raise ValueError(t("categories.name_exists", name=name))
+
+
+def _check_not_system(conn: sqlite3.Connection, category_id: int):
+    row = conn.execute("SELECT name FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row and row[0] in SYSTEM_CATEGORIES:
+        raise ValueError(t("categories.system", name=row[0]))
+
+
+def add_category(db_path: Path, name: str) -> int:
+    with _connect(db_path) as conn:
+        _check_new_name(conn, name)
+        return _category_id(conn, name)
+
+
+def rename_category(db_path: Path, category_id: int, name: str):
+    """Οι χειροκίνητες επιλογές δείχνουν στο id, οπότε ακολουθούν το νέο όνομα."""
+    with _connect(db_path) as conn:
+        _check_not_system(conn, category_id)
+        _check_new_name(conn, name)
+        conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+
+
+def set_category_income(db_path: Path, category_id: int, is_income: bool):
+    with _connect(db_path) as conn:
+        _check_not_system(conn, category_id)
+        conn.execute("UPDATE categories SET is_income = ? WHERE id = ?", (is_income, category_id))
+
+
+def delete_category(db_path: Path, category_id: int):
+    """Διαγράφει την κατηγορία· οι κινήσεις της γυρίζουν στην αυτόματη κατηγορία."""
+    with _connect(db_path) as conn:
+        _check_not_system(conn, category_id)
+        conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+
+def move_category(db_path: Path, category_id: int, step: int):
+    """Μετακινεί την κατηγορία πάνω (step=-1) ή κάτω (step=1) στη σειρά."""
+    with _connect(db_path) as conn:
+        ids = [row[0] for row in conn.execute("SELECT id FROM categories ORDER BY position, id")]
+        index = ids.index(category_id)
+        target = index + step
+        if not 0 <= target < len(ids):
+            return
+        ids[index], ids[target] = ids[target], ids[index]
+        conn.executemany("UPDATE categories SET position = ? WHERE id = ?",
+                         [(position, id_) for position, id_ in enumerate(ids)])
+
+
+def set_keywords(db_path: Path, category_id: int, keywords: list[str]):
+    """Αντικαθιστά τις λέξεις-κλειδιά της κατηγορίας. Τα κενά τους μένουν ως έχουν,
+    γιατί μετράνε στο ταίριασμα (π.χ. «POI » αλλά όχι «POINT»)."""
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM category_keywords WHERE category_id = ?", (category_id,))
+        _insert_keywords(conn, category_id, keywords)
+
+
+def migrate_manual_file(db_path: Path, path: Path):
+    """Μεταφέρει μία φορά τις παλιές επιλογές του manual_categories.json στη βάση.
+    Το αρχείο μένει στον δίσκο, αλλά δεν ξαναδιαβάζεται. Σε σφάλμα η βάση μένει ως
+    είχε και η μεταφορά θα ξαναδοκιμαστεί στο επόμενο άνοιγμα."""
+    with _connect(db_path) as conn:
+        if _version(conn) >= VERSION_MANUAL_MIGRATED:
+            return
+        if path.exists():
+            manual = json.loads(path.read_text(encoding="utf-8"))
+            for name in manual.get("income_categories", []):
+                _category_id(conn, name, income=True)
+            for key, name in manual.get("by_transaction", {}).items():
+                _set_manual(conn, [key], (), _category_id(conn, name))
+            for description, name in manual.get("by_description", {}).items():
+                _set_manual(conn, (), [description], _category_id(conn, name))
+        conn.execute(f"PRAGMA user_version = {VERSION_MANUAL_MIGRATED}")

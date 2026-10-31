@@ -11,9 +11,10 @@ Everything runs locally. Your bank data never leaves your computer.
 - Per-bank comparison, with a combined total
 - Expenses by category, daily expenses, top merchants
 - Searchable transaction list with a bank and category filter
-- Automatic categorisation by keywords, plus manual categories you set from the app
+- Automatic categorisation by keywords, plus manual categories you set from the app for one or many transactions
+- Categories and keywords are managed from the app
 - Transfers between your own banks are detected and left out of the combined total, so they are not counted twice
-- Bank exports are imported into a local SQLite database, and an import can be undone
+- Bank exports and categories are stored in a local SQLite database, and an import can be undone
 - Overlapping exports of the same bank are de-duplicated
 - A plain-text report for the terminal
 - Greek (default) and English interface
@@ -47,7 +48,7 @@ Download the transaction exports from each bank's e-banking, wherever you like. 
 
 The transactions are stored in `mymoney.db`, so the app doesn't need the original files afterwards. The app starts empty until you import something.
 
-You can keep importing newer exports. Transactions that appear in more than one file of the same bank are counted only once, and importing the exact same file twice is refused. To undo an import, press **Imports**, select it and press **Delete import**.
+You can keep importing newer exports. Transactions that appear in more than one file of the same bank are counted only once, and importing the exact same file twice is refused. To undo an import, press **Imports**, select it (the list shows the period each import covers) and press **Delete import**. This removes all of that file's transactions and brings back any it was hiding from another file. Your manual categories are kept, so they apply again if you import the file again.
 
 You can also import from the terminal. The bank is detected from the format unless you pass `--bank`:
 
@@ -64,7 +65,7 @@ Double-click `run.bat`, or:
 .venv\Scripts\python main.py
 ```
 
-Use **Year** and **Month** to narrow the period: a whole year, one month of a year, or the same month across all years (e.g. every September). The month list shows only months that have transactions in the selected year. Use **Bank** to pick a single bank or all banks. After editing `categories.json`, press **Reload** to apply your changes.
+Use **Year** and **Month** to narrow the period: a whole year, one month of a year, or the same month across all years (e.g. every September). The month list shows only months that have transactions in the selected year. Use **Bank** to pick a single bank or all banks.
 
 ### Terminal report
 
@@ -85,7 +86,7 @@ The interface is in Greek by default. To switch to English, pick **English** fro
 
 The choice is saved in `settings.json` and is used the next time the app starts, both in the window and in the terminal report. Amounts are shown as `1.234,56 €` in Greek and `€1,234.56` in English.
 
-Category names come from `categories.json` and your manual choices, so they stay as you wrote them in either language.
+Category names are your own data, so they stay as you wrote them in either language.
 
 ## Theme
 
@@ -97,11 +98,15 @@ Transactions are categorised in this order:
 
 1. A manual category set for that single transaction in the app
 2. A manual category set for all transactions with the same description
-3. Keywords in `categories.json`. The first category with a keyword found in the description wins, and matching ignores case.
+3. Keywords. The first category with a keyword found in the description wins, and matching ignores case.
 
-Manual choices are saved to `manual_categories.json`. To edit the keyword rules, use the **Κατηγορίες** button or open `categories.json` directly, then reload.
+To change the category of transactions, open the **Transactions** tab, select one or more (Ctrl/Shift + click, or Ctrl+A for all that are shown) and press **Change category…**. You can apply the choice to those transactions only, or to all transactions with the same description.
 
-A positive amount counts as income only if its category is listed in `income_categories` (or is "Λοιπά έσοδα"). A positive amount in an expense category is treated as a refund and lowers that category's expenses.
+To manage the categories themselves, press **Categories**. There you can add, rename, delete and reorder them, mark them as income categories and edit their keywords. Order matters, because categories are checked from the top of the list. Spaces in keywords count too, so `POI ` does not match `POINT`. Deleting a category sends its transactions back to their automatic category. "Λοιπά έσοδα" and "Λοιπά έξοδα" are the fallback categories, so they cannot be renamed or deleted.
+
+Everything is stored in `mymoney.db`. A new database starts with a default set of categories (`mymoney/default_categories.py`). If you have a `manual_categories.json` from an older version, its choices are moved into the database once, the next time the app starts. The file is then no longer used, and you can delete it.
+
+A positive amount counts as income only if its category is marked as an income category. A positive amount in an expense category is treated as a refund and lowers that category's expenses.
 
 ## Transfers between banks
 
@@ -119,17 +124,16 @@ When a debit in one bank matches a credit in another bank, the app treats the pa
 ```
 main.py                  entry point (GUI, --import or --report)
 mymoney/loader.py        reading bank exports, de-duplication, inter-bank transfers
-mymoney/database.py      the SQLite database of imported transactions
+mymoney/database.py      the SQLite database of imported transactions and categories
 mymoney/categories.py    keyword and manual categorisation
+mymoney/default_categories.py  the categories a new database starts with
 mymoney/stats.py         statistics
 mymoney/gui.py           Tkinter + matplotlib interface
 mymoney/i18n.py          Greek/English texts and amount formatting
 mymoney/theme.py         light/dark colours and widget styles
 mymoney/settings.py      reading and writing settings.json
 mymoney/assets/banks/    bank logos for the bank list
-categories.json          category keyword rules
-mymoney.db               your imported transactions (not committed)
-manual_categories.json   your manual category choices (not committed)
+mymoney.db               your imported transactions and categories (not committed)
 settings.json            your language and theme choice (not committed)
 ```
 

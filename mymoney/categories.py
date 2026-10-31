@@ -1,18 +1,18 @@
 """Κατηγοριοποίηση κινήσεων.
 
 Σειρά προτεραιότητας:
-1. Χειροκίνητη κατηγορία για τη συγκεκριμένη κίνηση (manual_categories.json)
+1. Χειροκίνητη κατηγορία για τη συγκεκριμένη κίνηση
 2. Χειροκίνητη κατηγορία για όλες τις κινήσεις με την ίδια περιγραφή
-3. Λέξεις-κλειδιά από το categories.json
+3. Λέξεις-κλειδιά των κατηγοριών
+
+Όλα αποθηκεύονται στη βάση (database.py).
 """
 
-import json
 from pathlib import Path
 
+from . import database
+from .default_categories import EXPENSE_OTHER, INCOME_OTHER
 from .loader import Transaction
-
-INCOME_OTHER = "Λοιπά έσοδα"
-EXPENSE_OTHER = "Λοιπά έξοδα"
 
 
 def tx_key(tx: Transaction) -> str:
@@ -21,44 +21,22 @@ def tx_key(tx: Transaction) -> str:
 
 
 class Categorizer:
-    def __init__(self, rules: dict[str, list[str]], income_categories: list[str] = ()):
+    def __init__(self, db_path: Path, rules: dict[str, list[str]], income_categories: list[str] = ()):
+        self.db_path = db_path
         self.rules = [
             (name, [k.casefold() for k in keywords]) for name, keywords in rules.items()
         ]
         self.income_categories = {*income_categories, INCOME_OTHER}
-        self.manual_path: Path | None = None
         self.by_transaction: dict[str, str] = {}
         self.by_description: dict[str, str] = {}
-        self.manual_income: set[str] = set()
 
     @classmethod
-    def from_file(cls, path: Path, manual_path: Path | None = None) -> "Categorizer":
-        data = {}
-        if path.exists():
-            with path.open(encoding="utf-8") as f:
-                data = json.load(f)
-        categorizer = cls(data.get("categories", {}), data.get("income_categories", []))
-        if manual_path is not None:
-            categorizer.manual_path = manual_path
-            if manual_path.exists():
-                with manual_path.open(encoding="utf-8") as f:
-                    manual = json.load(f)
-                categorizer.by_transaction = manual.get("by_transaction", {})
-                categorizer.by_description = manual.get("by_description", {})
-                categorizer.manual_income = set(manual.get("income_categories", []))
-                categorizer.income_categories |= categorizer.manual_income
+    def from_db(cls, db_path: Path) -> "Categorizer":
+        records = database.load_categories(db_path)
+        categorizer = cls(db_path, {record.name: record.keywords for record in records},
+                          [record.name for record in records if record.is_income])
+        categorizer.by_transaction, categorizer.by_description = database.load_manual(db_path)
         return categorizer
-
-    def save_manual(self):
-        if self.manual_path is None:
-            return
-        data = {
-            "by_transaction": self.by_transaction,
-            "by_description": self.by_description,
-            "income_categories": sorted(self.manual_income),
-        }
-        with self.manual_path.open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def categorize(self, description: str, is_income: bool) -> str:
         text = description.casefold()
@@ -82,31 +60,33 @@ class Categorizer:
                income: bool = False):
         """Βάζει τις κινήσεις στην κατηγορία. Με whole_description=True ισχύει
         για όλες τις κινήσεις (και μελλοντικές) με την ίδια περιγραφή."""
-        for tx in txs:
-            if whole_description:
-                self.by_description[tx.description] = category
-                self.by_transaction.pop(tx_key(tx), None)
-            else:
-                self.by_transaction[tx_key(tx)] = category
+        keys = [tx_key(tx) for tx in txs]
+        if whole_description:
+            descriptions = [tx.description for tx in txs]
+            database.assign_descriptions(self.db_path, descriptions, keys, category, income)
+            self.by_description.update(dict.fromkeys(descriptions, category))
+            for key in keys:
+                self.by_transaction.pop(key, None)
+        else:
+            database.assign_transactions(self.db_path, keys, category, income)
+            self.by_transaction.update(dict.fromkeys(keys, category))
+        if category not in self.all_categories():
+            self.rules.append((category, []))
         if income:
-            self.manual_income.add(category)
             self.income_categories.add(category)
-        self.save_manual()
 
     def clear(self, txs: list[Transaction]):
         """Επαναφορά στην αυτόματη κατηγορία (λέξεις-κλειδιά)."""
-        for tx in txs:
-            self.by_transaction.pop(tx_key(tx), None)
-            self.by_description.pop(tx.description, None)
-        self.save_manual()
+        keys = [tx_key(tx) for tx in txs]
+        descriptions = [tx.description for tx in txs]
+        database.clear_manual(self.db_path, keys, descriptions)
+        for key in keys:
+            self.by_transaction.pop(key, None)
+        for description in descriptions:
+            self.by_description.pop(description, None)
 
     def all_categories(self) -> list[str]:
-        names = [name for name, _ in self.rules]
-        for extra in [*self.by_description.values(), *self.by_transaction.values(),
-                      *sorted(self.income_categories), EXPENSE_OTHER]:
-            if extra not in names:
-                names.append(extra)
-        return names
+        return [name for name, _ in self.rules]
 
     def is_income_category(self, name: str) -> bool:
         """Θετικό ποσό σε κατηγορία εξόδων (π.χ. SKROUTZ) είναι επιστροφή
