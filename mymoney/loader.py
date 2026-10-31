@@ -1,7 +1,6 @@
-"""Φόρτωση κινήσεων από τα αρχεία των τραπεζών.
+"""Ανάγνωση κινήσεων από τα αρχεία των τραπεζών, για εισαγωγή στη βάση (database.py).
 
-Κάθε υποφάκελος του files είναι μία τράπεζα (π.χ. files/eurobank,
-files/nationalbank, files/piraeus). Υποστηρίζονται:
+Υποστηρίζονται:
 - .csv  : εξαγωγή Eurobank (ημ/νία;ημ/νία αξίας;περιγραφή;ποσό;υπόλοιπο)
 - .xlsx : εξαγωγή Εθνικής Τράπεζας (statementexport) ή Πειραιώς (Λίστα
           Ενοποιημένων Συναλλαγών)· η μορφή αναγνωρίζεται από τις στήλες.
@@ -65,6 +64,15 @@ def load_file(path: Path, bank: str = "") -> list[Transaction]:
     return load_csv(path, bank)
 
 
+def detect_bank(path: Path) -> str:
+    """Η τράπεζα στην οποία ανήκει η μορφή του αρχείου· ValueError αν είναι άγνωστη."""
+    if path.suffix.casefold() == ".xlsx":
+        return _xlsx_format(_xlsx_rows(path))[3]
+    if not load_csv(path):
+        raise ValueError(t("error.no_transactions"))
+    return "eurobank"
+
+
 def load_csv(path: Path, bank: str = "") -> list[Transaction]:
     transactions = []
     with path.open(encoding="utf-8-sig", newline="") as f:
@@ -125,28 +133,33 @@ PIRAEUS_COLUMNS = ("Περιγραφή Συναλλαγής (είδος)", "Ημ
 PIRAEUS_CARD_SUFFIX = re.compile(r"\((ΑΓΟΡΑ ΜΕ ΚΑΡΤΑ|ΑΝΤΙΛ/ΜΟΣ ΑΓΟΡΑΣ ΜΕ ΚΑΡΤΑ)\)\s*$")
 
 
-def load_xlsx(path: Path, bank: str = "") -> list[Transaction]:
+def _xlsx_rows(path: Path) -> list[tuple]:
     from openpyxl import load_workbook
 
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
         ws = wb["data"] if "data" in wb.sheetnames else wb.worksheets[0]
-        rows = list(ws.iter_rows(values_only=True))
+        return list(ws.iter_rows(values_only=True))
     finally:
         wb.close()
 
+
+def _xlsx_format(rows: list[tuple]) -> tuple:
+    """Βρίσκει την επικεφαλίδα· επιστρέφει (γραμμή, στήλες, parser, τράπεζα)."""
     # Η επικεφαλίδα δεν είναι πάντα στην πρώτη γραμμή (η Πειραιώς έχει τίτλο από πάνω).
     for i, row in enumerate(rows[:20]):
         header = [str(h).strip() if h is not None else "" for h in row]
         col = {name: j for j, name in enumerate(header) if name}
         if all(name in col for name in PIRAEUS_COLUMNS):
-            parse = _piraeus_row
-            break
+            return i, col, _piraeus_row, "piraeus"
         if all(name in col for name in NBG_COLUMNS):
-            parse = _nbg_row
-            break
-    else:
-        raise ValueError(t("error.unknown_xlsx", file=path.name))
+            return i, col, _nbg_row, "nationalbank"
+    raise ValueError(t("error.unknown_xlsx"))
+
+
+def load_xlsx(path: Path, bank: str = "") -> list[Transaction]:
+    rows = _xlsx_rows(path)
+    i, col, parse, _ = _xlsx_format(rows)
 
     transactions = []
     for row in rows[i + 1:]:
@@ -218,14 +231,13 @@ def _match_key(tx: Transaction) -> tuple:
     return (tx.value_date, tx.amount, prefix)
 
 
-def load_folder(folder: Path, bank: str = "") -> list[Transaction]:
-    """Διαβάζει όλα τα αρχεία του φακέλου και αφαιρεί κινήσεις που υπάρχουν ήδη
+def merge_files(files: list[list[Transaction]]) -> list[Transaction]:
+    """Ενώνει τις κινήσεις των αρχείων μιας τράπεζας και αφαιρεί όσες υπάρχουν ήδη
     σε άλλο αρχείο (όταν δύο εξαγωγές καλύπτουν τις ίδιες ημερομηνίες).
     Ίδιες κινήσεις μέσα στο ίδιο αρχείο (π.χ. δύο καφέδες την ίδια μέρα)
     κρατιούνται όλες."""
-    files = [load_file(path, bank) for path in data_files(folder)]
     # Προτιμάμε τα αρχεία με υπόλοιπο (εξαγωγή λογαριασμού) όταν υπάρχει επικάλυψη.
-    files.sort(key=lambda txs: not any(t.balance is not None for t in txs))
+    files = sorted(files, key=lambda txs: not any(t.balance is not None for t in txs))
 
     available = Counter()  # κινήσεις προηγούμενων αρχείων που δεν έχουν «αντιστοιχιστεί»
     result = []
@@ -237,24 +249,6 @@ def load_folder(folder: Path, bank: str = "") -> list[Transaction]:
                 continue
             result.append(tx)
         available.update(keys)
-    result.sort(key=lambda t: t.date)
-    return result
-
-
-def data_files(folder: Path) -> list[Path]:
-    return sorted(p for p in folder.glob("*")
-                  if p.suffix.casefold() in SUPPORTED_SUFFIXES and not p.name.startswith("~$"))
-
-
-def bank_folders(files_dir: Path) -> list[Path]:
-    return sorted(p for p in files_dir.iterdir() if p.is_dir()) if files_dir.exists() else []
-
-
-def load_banks(files_dir: Path) -> list[Transaction]:
-    """Κινήσεις όλων των τραπεζών (ένας υποφάκελος ανά τράπεζα), χρονολογικά."""
-    result = []
-    for folder in bank_folders(files_dir):
-        result.extend(load_folder(folder, folder.name))
     result.sort(key=lambda t: t.date)
     return result
 

@@ -1,8 +1,10 @@
-"""MyMoney: στατιστικά εσόδων/εξόδων από τα αρχεία των τραπεζών στον φάκελο files
-(ένας υποφάκελος ανά τράπεζα, π.χ. files/eurobank, files/nationalbank).
+"""MyMoney: στατιστικά εσόδων/εξόδων από τα αρχεία των τραπεζών, που εισάγει ο χρήστης
+στη βάση δεδομένων mymoney.db.
 
 Χρήση:
     python main.py            # γραφική εφαρμογή
+    python main.py --import ΑΡΧΕΙΟ [ΑΡΧΕΙΟ ...]   # εισαγωγή αρχείων στη βάση
+    python main.py --import ΑΡΧΕΙΟ --bank eurobank
     python main.py --report   # αναφορά στο τερματικό (όλες οι τράπεζες)
     python main.py --report --bank eurobank
     python main.py --report --year 2026
@@ -15,27 +17,50 @@ import sys
 from pathlib import Path
 
 from mymoney import i18n
-from mymoney.i18n import bank_label, period_label, t
+from mymoney.i18n import bank_key, bank_label, period_label, t
 
 BASE_DIR = Path(__file__).resolve().parent
-FILES_DIR = BASE_DIR / "files"
+DB_FILE = BASE_DIR / "mymoney.db"
 CATEGORIES_FILE = BASE_DIR / "categories.json"
 MANUAL_FILE = BASE_DIR / "manual_categories.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
 
+def import_files(paths: list[str], bank: str | None):
+    from mymoney.database import import_file, list_imports
+    from mymoney.loader import detect_bank
+
+    failed = False
+    for name in paths:
+        path = Path(name)
+        try:
+            banks = {record.bank for record in list_imports(DB_FILE)}
+            result = import_file(DB_FILE, path, bank_key(bank, banks) if bank else detect_bank(path))
+        except Exception as exc:  # ένα χαλασμένο αρχείο δεν σταματά τα υπόλοιπα
+            print(f"{path.name}: {exc}", file=sys.stderr)
+            failed = True
+            continue
+        print(t("import.result", file=result.file_name, bank=bank_label(result.bank),
+                added=result.added, rows=result.rows))
+    if failed:
+        sys.exit(1)
+
+
 def print_report(year: str | None, month: str | None, bank: str | None):
     from mymoney.categories import Categorizer
-    from mymoney.loader import load_banks, split_transfers
+    from mymoney.database import load_transactions
+    from mymoney.loader import split_transfers
     from mymoney.stats import compute, fmt
 
-    txs = load_banks(FILES_DIR)
+    txs = load_transactions(DB_FILE)
+    if not txs:
+        sys.exit(t("report.empty"))
     txs = [tx for tx in txs if tx.in_period(year, month)]
     categorizer = Categorizer.from_file(CATEGORIES_FILE, MANUAL_FILE)
     banks = sorted({tx.bank for tx in txs}, key=bank_label)
 
     if bank:
-        # Δεκτό είτε το όνομα του φακέλου είτε το εμφανιζόμενο όνομα.
+        # Δεκτό είτε το όνομα στη βάση είτε το εμφανιζόμενο όνομα.
         matches = [b for b in banks if bank.casefold() in (b.casefold(), bank_label(b).casefold())]
         if not matches:
             sys.exit(t("report.unknown_bank", bank=bank, banks=", ".join(banks)))
@@ -88,6 +113,7 @@ def main():
     i18n.load_settings(SETTINGS_FILE)
 
     parser = argparse.ArgumentParser(description=t("cli.description"))
+    parser.add_argument("--import", dest="import_files", nargs="+", metavar="FILE", help=t("cli.import"))
     parser.add_argument("--report", action="store_true", help=t("cli.report"))
     parser.add_argument("--month", help=t("cli.month"))
     parser.add_argument("--year", help=t("cli.year"))
@@ -99,9 +125,15 @@ def main():
         i18n.set_language(args.lang)
         i18n.save_settings(SETTINGS_FILE)
 
-    if args.report:
+    if args.import_files or args.report:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
+
+    if args.import_files:
+        import_files(args.import_files, args.bank)
+        return
+
+    if args.report:
         year, month = args.year, args.month
         if month and "-" in month:  # παλιά μορφή 2026-09
             year, month = month.split("-", 1)
@@ -117,7 +149,7 @@ def main():
 
     theme.load_settings(SETTINGS_FILE)
 
-    app = MyMoneyApp(FILES_DIR, CATEGORIES_FILE, MANUAL_FILE, SETTINGS_FILE)
+    app = MyMoneyApp(DB_FILE, CATEGORIES_FILE, MANUAL_FILE, SETTINGS_FILE)
     app.mainloop()
 
 

@@ -22,6 +22,9 @@ desktop.ini
 # (οι εξαγωγές των τραπεζών εξαιρούνται από το files/.gitignore)
 manual_categories.json
 
+# Προσωπικά δεδομένα: η βάση με τις κινήσεις που έχουν εισαχθεί
+mymoney.db*
+
 # Ρυθμίσεις χρήστη (γλώσσα, θέμα)
 settings.json
 

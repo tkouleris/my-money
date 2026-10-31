@@ -1,8 +1,8 @@
 # MyMoney
 
-A small desktop app that reads the transaction exports of your Greek bank accounts and shows income and expense statistics. You can view each bank on its own or all banks combined.
+A small desktop app that imports the transaction exports of your Greek bank accounts into a local database and shows income and expense statistics. You can view each bank on its own or all banks combined.
 
-Everything runs locally. Your bank files never leave your computer.
+Everything runs locally. Your bank data never leaves your computer.
 
 ## Features
 
@@ -13,6 +13,7 @@ Everything runs locally. Your bank files never leave your computer.
 - Searchable transaction list with a bank and category filter
 - Automatic categorisation by keywords, plus manual categories you set from the app
 - Transfers between your own banks are detected and left out of the combined total, so they are not counted twice
+- Bank exports are imported into a local SQLite database, and an import can be undone
 - Overlapping exports of the same bank are de-duplicated
 - A plain-text report for the terminal
 - Greek (default) and English interface
@@ -20,11 +21,11 @@ Everything runs locally. Your bank files never leave your computer.
 
 ## Supported banks
 
-| Folder               | Bank           | Export format                                               | Balance |
-|----------------------|----------------|-------------------------------------------------------------|---------|
-| `files/eurobank`     | Eurobank       | `.csv` (`;`-separated, Greek number format)                 | yes     |
-| `files/nationalbank` | National Bank  | `.xlsx` (`statementexport…`)                                 | yes     |
-| `files/piraeus`      | Piraeus Bank   | `.xlsx` (Λίστα Ενοποιημένων Συναλλαγών)                     | no      |
+| Name           | Bank           | Export format                                               | Balance |
+|----------------|----------------|-------------------------------------------------------------|---------|
+| `eurobank`     | Eurobank       | `.csv` (`;`-separated, Greek number format)                 | yes     |
+| `nationalbank` | National Bank  | `.xlsx` (`statementexport…`)                                 | yes     |
+| `piraeus`      | Piraeus Bank   | `.xlsx` (Λίστα Ενοποιημένων Συναλλαγών)                     | no      |
 
 The app tells the two `.xlsx` formats apart by their column headers, so the file names don't matter.
 
@@ -42,16 +43,18 @@ python -m venv .venv
 
 ## Adding your data
 
-Download the transaction exports from each bank's e-banking and put them in the matching folder:
+Download the transaction exports from each bank's e-banking, wherever you like. Then press **Import files** and select one or more of them. The app suggests the bank of each file from its format; you can change it or type a new bank name before importing.
 
-```
-files/
-├── eurobank/        2026.01_2026.08.csv, 2026.09.csv, ...
-├── nationalbank/    statementexport28-10-2026.xlsx
-└── piraeus/         Λίστα Ενοποιημένων Συναλλαγών_20261028.xlsx
-```
+The transactions are stored in `mymoney.db`, so the app doesn't need the original files afterwards. The app starts empty until you import something.
 
-You can keep adding newer exports to a folder. Transactions that appear in more than one file of the same bank are counted only once.
+You can keep importing newer exports. Transactions that appear in more than one file of the same bank are counted only once, and importing the exact same file twice is refused. To undo an import, press **Imports**, select it and press **Delete import**.
+
+You can also import from the terminal. The bank is detected from the format unless you pass `--bank`:
+
+```bat
+.venv\Scripts\python main.py --import 2026.09.csv statementexport28-10-2026.xlsx
+.venv\Scripts\python main.py --import alpha.csv --bank "Alpha Bank"
+```
 
 ## Running
 
@@ -61,13 +64,13 @@ Double-click `run.bat`, or:
 .venv\Scripts\python main.py
 ```
 
-Use **Year** and **Month** to narrow the period: a whole year, one month of a year, or the same month across all years (e.g. every September). The month list shows only months that have transactions in the selected year. Use **Bank** to pick a single bank or all banks. After adding new files, press **Reload files** to reload them.
+Use **Year** and **Month** to narrow the period: a whole year, one month of a year, or the same month across all years (e.g. every September). The month list shows only months that have transactions in the selected year. Use **Bank** to pick a single bank or all banks. After editing `categories.json`, press **Reload** to apply your changes.
 
 ### Terminal report
 
 ```bat
 .venv\Scripts\python main.py --report                    # all banks
-.venv\Scripts\python main.py --report --bank piraeus     # one bank (folder name or display name)
+.venv\Scripts\python main.py --report --bank piraeus     # one bank (its name or display name)
 .venv\Scripts\python main.py --report --year 2026 --month 09   # one month of a year
 .venv\Scripts\python main.py --report --year 2026               # one year
 ```
@@ -106,16 +109,17 @@ When a debit in one bank matches a credit in another bank, the app treats the pa
 
 ## Adding another bank
 
-1. Create a folder under `files/` (e.g. `files/alphabank`) and put the exports there.
-2. Optionally give it a display name in both languages by adding a `bank.<folder>` entry (e.g. `bank.alphabank`) to `STRINGS` in `mymoney/i18n.py`.
-3. Optionally add its logo as a 20×20 PNG at `mymoney/assets/banks/<folder>.png` (e.g. `alphabank.png`). It is shown next to the bank's name in the bank list. Banks without a logo are listed without one.
-4. If the export format is new, add a row parser next to `_nbg_row` / `_piraeus_row` in `mymoney/loader.py` and detect it by its column headers in `load_xlsx` (or add a CSV loader).
+1. Import its exports and type the bank's name (e.g. `alphabank`) in the import window.
+2. Optionally give it a display name in both languages by adding a `bank.<name>` entry (e.g. `bank.alphabank`) to `STRINGS` in `mymoney/i18n.py`.
+3. Optionally add its logo as a 20×20 PNG at `mymoney/assets/banks/<name>.png` (e.g. `alphabank.png`). It is shown next to the bank's name in the bank list. Banks without a logo are listed without one.
+4. If the export format is new, add a row parser next to `_nbg_row` / `_piraeus_row` in `mymoney/loader.py` and detect it by its column headers in `_xlsx_format` (or add a CSV loader and handle it in `detect_bank`).
 
 ## Project structure
 
 ```
-main.py                  entry point (GUI or --report)
+main.py                  entry point (GUI, --import or --report)
 mymoney/loader.py        reading bank exports, de-duplication, inter-bank transfers
+mymoney/database.py      the SQLite database of imported transactions
 mymoney/categories.py    keyword and manual categorisation
 mymoney/stats.py         statistics
 mymoney/gui.py           Tkinter + matplotlib interface
@@ -124,10 +128,11 @@ mymoney/theme.py         light/dark colours and widget styles
 mymoney/settings.py      reading and writing settings.json
 mymoney/assets/banks/    bank logos for the bank list
 categories.json          category keyword rules
+mymoney.db               your imported transactions (not committed)
 manual_categories.json   your manual category choices (not committed)
 settings.json            your language and theme choice (not committed)
 ```
 
 ## Privacy
 
-Bank exports in `files/`, `manual_categories.json` and `settings.json` are listed in `.gitignore` and are never committed. Only the folder structure is kept, using `.gitkeep` files.
+`mymoney.db`, `manual_categories.json`, `settings.json` and bank exports kept in `files/` are listed in `.gitignore` and are never committed. The database is not encrypted, so anyone with access to the file can read it.

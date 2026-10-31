@@ -14,7 +14,7 @@ DEFAULT_LANGUAGE = "el"
 _language = DEFAULT_LANGUAGE
 
 STRINGS = {
-    # Τράπεζες (κλειδί = όνομα φακέλου σε πεζά)
+    # Τράπεζες (κλειδί = όνομα τράπεζας στη βάση, σε πεζά)
     "bank.eurobank": ("Eurobank", "Eurobank"),
     "bank.nationalbank": ("Εθνική Τράπεζα", "National Bank of Greece"),
     "bank.piraeus": ("Πειραιώς", "Piraeus Bank"),
@@ -26,11 +26,14 @@ STRINGS = {
     "toolbar.bank": ("Τράπεζα:", "Bank:"),
     "theme.to_dark": ("☾ Σκοτεινό", "☾ Dark"),
     "theme.to_light": ("☀ Φωτεινό", "☀ Light"),
-    "toolbar.reload": ("⟳ Επαναφόρτωση αρχείων", "⟳ Reload files"),
-    "toolbar.folder": ("📂 Φάκελος files", "📂 Files folder"),
+    "toolbar.import": ("📥 Εισαγωγή αρχείων…", "📥 Import files…"),
+    "toolbar.imports": ("🗂 Εισαγωγές", "🗂 Imports"),
+    "toolbar.reload": ("⟳ Επαναφόρτωση", "⟳ Reload"),
     "toolbar.categories": ("✎ Κατηγορίες", "✎ Categories"),
     "status": ("{banks} τράπεζες · {files} αρχεία · {count} κινήσεις",
                "{banks} banks · {files} files · {count} transactions"),
+    "status.empty": ("Δεν υπάρχουν κινήσεις. Πάτα «Εισαγωγή αρχείων» για να προσθέσεις τις εξαγωγές των τραπεζών σου.",
+                     "No transactions yet. Press “Import files” to add your bank exports."),
     "all_years": ("Όλα τα έτη", "All years"),
     "all_months": ("Όλοι οι μήνες", "All months"),
     "all_time": ("Όλη η περίοδος", "All time"),
@@ -72,6 +75,8 @@ STRINGS = {
     "col.total": ("Σύνολο", "Total"),
     "col.average": ("Μέσος όρος", "Average"),
     "col.date": ("Ημερομηνία", "Date"),
+    "col.file": ("Αρχείο", "File"),
+    "col.imported_at": ("Εισαγωγή", "Imported"),
     "total": ("Σύνολο", "Total"),
 
     # Υποδείξεις
@@ -117,21 +122,38 @@ STRINGS = {
     "dialog.cancel": ("Άκυρο", "Cancel"),
     "dialog.ok": ("OK", "OK"),
 
+    # Εισαγωγή αρχείων
+    "import.title": ("Εισαγωγή αρχείων", "Import files"),
+    "import.filetype": ("Εξαγωγές τραπεζών", "Bank exports"),
+    "import.prompt": ("Διάλεξε την τράπεζα κάθε αρχείου ή γράψε νέα:",
+                      "Pick the bank of each file or type a new one:"),
+    "import.ok": ("Εισαγωγή", "Import"),
+    "import.result": ("{file} → {bank}: {added} νέες κινήσεις ({rows} γραμμές στο αρχείο)",
+                      "{file} → {bank}: {added} new transactions ({rows} rows in the file)"),
+    "imports.title": ("Εισαγωγές", "Imports"),
+    "imports.delete": ("Διαγραφή εισαγωγής", "Delete import"),
+    "imports.close": ("Κλείσιμο", "Close"),
+    "imports.confirm": ("Να διαγραφούν οι κινήσεις των αρχείων που διάλεξες από τη βάση;\n{files}",
+                        "Delete the transactions of the selected files from the database?\n{files}"),
+
     # Μηνύματα
     "msg.error": ("Σφάλμα", "Error"),
-    "msg.load_failed": ("Αποτυχία ανάγνωσης αρχείων:\n{error}", "Could not read the files:\n{error}"),
+    "msg.load_failed": ("Αποτυχία ανάγνωσης δεδομένων:\n{error}", "Could not read the data:\n{error}"),
     "msg.category": ("Κατηγορία", "Category"),
     "msg.select_first": ("Διάλεξε πρώτα μία ή περισσότερες κινήσεις.",
                          "Select one or more transactions first."),
     "msg.categories": ("Κατηγορίες", "Categories"),
     "msg.categories_reload": ("Αφού αποθηκεύσεις τις αλλαγές στο categories.json, "
-                              "πάτα «Επαναφόρτωση αρχείων».",
+                              "πάτα «Επαναφόρτωση».",
                               "After saving your changes to categories.json, "
-                              "press “Reload files”."),
+                              "press “Reload”."),
 
     # Σφάλματα ανάγνωσης
     "error.missing_columns": ("{file}: λείπουν οι στήλες {columns}", "{file}: missing columns {columns}"),
-    "error.unknown_xlsx": ("{file}: άγνωστη μορφή αρχείου xlsx", "{file}: unknown xlsx format"),
+    "error.unknown_xlsx": ("άγνωστη μορφή αρχείου xlsx", "unknown xlsx format"),
+    "error.no_transactions": ("δεν βρέθηκαν κινήσεις στο αρχείο", "no transactions found in the file"),
+    "error.already_imported": ("το αρχείο έχει ήδη εισαχθεί (τράπεζα: {bank})",
+                               "this file has already been imported (bank: {bank})"),
 
     # Αναφορά τερματικού
     "cli.description": ("Στατιστικά εσόδων/εξόδων", "Income/expense statistics"),
@@ -140,8 +162,11 @@ STRINGS = {
     "report.bad_month": ("Μη έγκυρος μήνας «{month}». Δώσε π.χ. 09 ή 2026-09.",
                          "Invalid month “{month}”. Use e.g. 09 or 2026-09."),
     "cli.year": ("φίλτρο έτους για την αναφορά, π.χ. 2026", "year filter for the report, e.g. 2026"),
-    "cli.bank": ("μόνο μία τράπεζα, π.χ. eurobank ή nationalbank",
-                 "a single bank, e.g. eurobank or nationalbank"),
+    "cli.bank": ("μόνο μία τράπεζα, π.χ. eurobank ή nationalbank· με --import, η τράπεζα των αρχείων",
+                 "a single bank, e.g. eurobank or nationalbank; with --import, the bank of the files"),
+    "cli.import": ("εισαγωγή αρχείων τράπεζας στη βάση", "import bank files into the database"),
+    "report.empty": ("Δεν υπάρχουν κινήσεις στη βάση. Κάνε εισαγωγή με --import ΑΡΧΕΙΟ.",
+                     "There are no transactions in the database. Import some with --import FILE."),
     "cli.lang": ("γλώσσα (el ή en)· αποθηκεύεται για τις επόμενες φορές",
                  "language (el or en); remembered for next time"),
     "report.unknown_bank": ("Άγνωστη τράπεζα «{bank}». Διαθέσιμες: {banks}",
@@ -204,9 +229,24 @@ def t(key: str, **kwargs) -> str:
 
 
 def bank_label(bank: str) -> str:
-    """Εμφανιζόμενο όνομα τράπεζας από το όνομα του φακέλου της."""
+    """Εμφανιζόμενο όνομα τράπεζας από το όνομά της στη βάση."""
     key = f"bank.{bank.casefold()}"
     return t(key) if key in STRINGS else bank
+
+
+def known_banks() -> list[str]:
+    """Οι τράπεζες που έχουν εμφανιζόμενο όνομα στο STRINGS."""
+    return [key.removeprefix("bank.") for key in STRINGS if key.startswith("bank.")]
+
+
+def bank_key(name: str, banks=()) -> str:
+    """Το όνομα τράπεζας για τη βάση από ό,τι έγραψε ο χρήστης (όνομα ή εμφανιζόμενο όνομα)·
+    banks είναι οι τράπεζες που υπάρχουν ήδη. Μια νέα τράπεζα μένει όπως γράφτηκε."""
+    name = name.strip()
+    for bank in [*banks, *known_banks()]:
+        if name.casefold() in (bank.casefold(), bank_label(bank).casefold()):
+            return bank
+    return name
 
 
 def fmt_money(value: Decimal | float | None, decimals: int = 2) -> str:

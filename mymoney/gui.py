@@ -4,7 +4,7 @@ import os
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import matplotlib
 
@@ -14,14 +14,14 @@ import matplotlib.ticker  # noqa: E402
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
-from . import i18n, theme  # noqa: E402
+from . import database, i18n, theme  # noqa: E402
 from .categories import Categorizer  # noqa: E402
-from .i18n import bank_label, fmt_money, month_name, t  # noqa: E402
-from .loader import bank_folders, data_files, load_banks, split_transfers  # noqa: E402
+from .i18n import bank_key, bank_label, fmt_money, known_banks, month_name, t  # noqa: E402
+from .loader import SUPPORTED_SUFFIXES, detect_bank, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
 from .theme import palette as colors  # noqa: E402
 
-# Λογότυπα τραπεζών 20x20: assets/banks/<όνομα φακέλου>.png
+# Λογότυπα τραπεζών 20x20: assets/banks/<όνομα τράπεζας>.png
 BANK_LOGOS = Path(__file__).resolve().parent / "assets" / "banks"
 
 def _style_axes(ax):
@@ -237,26 +237,115 @@ class CategoryDialog(tk.Toplevel):
         self.destroy()
 
 
+class ImportDialog(tk.Toplevel):
+    """Παράθυρο επιβεβαίωσης της τράπεζας κάθε αρχείου πριν από την εισαγωγή."""
+
+    def __init__(self, master, files, banks):
+        super().__init__(master)
+        self.title(t("import.title"))
+        self.transient(master)
+        self.resizable(False, False)
+        self.result = None
+        self.banks = banks
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=t("import.prompt")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        self.rows = []  # (αρχείο, μεταβλητή τράπεζας)
+        for i, (path, bank) in enumerate(files, start=1):
+            ttk.Label(body, text=path.name).grid(row=i, column=0, sticky="w", pady=2)
+            var = tk.StringVar(value=bank_label(bank))
+            ttk.Combobox(body, textvariable=var, values=[bank_label(b) for b in banks],
+                         width=24).grid(row=i, column=1, sticky="e", padx=(12, 0), pady=2)
+            self.rows.append((path, var))
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=len(files) + 1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        ttk.Button(buttons, text=t("dialog.cancel"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("import.ok"), command=self._ok).pack(side="right", padx=6)
+        self.bind("<Return>", lambda _: self._ok())
+        self.bind("<Escape>", lambda _: self.destroy())
+
+        theme.style_title_bar(self)
+        self.grab_set()
+        self.wait_window()
+
+    def _ok(self):
+        result = [(path, bank_key(var.get(), self.banks)) for path, var in self.rows]
+        if all(bank for _, bank in result):
+            self.result = result
+            self.destroy()
+
+
+class ImportsDialog(tk.Toplevel):
+    """Λίστα των εισαγωγών της βάσης, με δυνατότητα διαγραφής."""
+
+    def __init__(self, master, db_file: Path):
+        super().__init__(master)
+        self.title(t("imports.title"))
+        self.transient(master)
+        self.geometry("720x360")
+        self.db_file = db_file
+        self.changed = False
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        buttons = ttk.Frame(body)
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
+        ttk.Button(buttons, text=t("imports.close"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("imports.delete"), command=self._delete).pack(side="left")
+        frame, self.tree = make_tree(
+            body, ["col.file", "col.bank", "col.imported_at", "col.transactions"],
+            [300, 150, 130, 80], anchors={3: "e"},
+        )
+        frame.pack(fill="both", expand=True)
+        self.bind("<Escape>", lambda _: self.destroy())
+        self._fill()
+
+        theme.style_title_bar(self)
+        self.grab_set()
+        self.wait_window()
+
+    def _fill(self):
+        self.tree.delete(*self.tree.get_children())
+        for record in database.list_imports(self.db_file):
+            self.tree.insert("", "end", iid=str(record.id), values=(
+                record.file_name, bank_label(record.bank), f"{record.imported_at:%d/%m/%Y %H:%M}", record.rows))
+
+    def _delete(self):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        names = "\n".join(self.tree.item(iid, "values")[0] for iid in selection)
+        if not messagebox.askyesno(t("imports.title"), t("imports.confirm", files=names), parent=self):
+            return
+        for iid in selection:
+            database.delete_import(self.db_file, int(iid))
+        self.changed = True
+        self._fill()
+
+
 class MyMoneyApp(tk.Tk):
-    def __init__(self, files_dir: Path, categories_file: Path, manual_file: Path,
+    def __init__(self, db_file: Path, categories_file: Path, manual_file: Path,
                  settings_file: Path | None = None):
         super().__init__()
-        self.files_dir = files_dir
+        self.db_file = db_file
         self.categories_file = categories_file
         self.manual_file = manual_file
         self.settings_file = settings_file
         self.tx_items = {}  # iid του πίνακα κινήσεων -> Transaction
         self.geometry("1150x780")
-        self.minsize(900, 600)
+        self.minsize(900, 640)
         theme.apply(self)
 
         self.all_transactions = []
-        self.banks: list[str] = []  # ονόματα φακέλων, ταξινομημένα κατά εμφανιζόμενο όνομα
+        self.imports: list[database.ImportRecord] = []
+        self.banks: list[str] = []  # ονόματα τραπεζών, ταξινομημένα κατά εμφανιζόμενο όνομα
         self._months: list[str] = []  # μήνες («01».. «12») του φίλτρου μήνα
         self.stats: Stats | None = None
         self.bank_stats: dict[str, Stats] = {}
         self.transfers = []  # μεταφορές μεταξύ τραπεζών της τρέχουσας περιόδου
-        self._bank: str | None = None  # επιλεγμένη τράπεζα (όνομα φακέλου) ή None για όλες
+        self._bank: str | None = None  # επιλεγμένη τράπεζα ή None για όλες
         self._bank_icons: dict[str, tk.PhotoImage] = {}
 
         self._build_ui()
@@ -303,9 +392,13 @@ class MyMoneyApp(tk.Tk):
         self.bank_box = IconDropdown(bar, command=self._select_bank, width=16)
         self.bank_box.pack(side="left", padx=(6, 16))
 
-        ttk.Button(bar, text=t("toolbar.reload"), command=self.reload).pack(side="left")
-        ttk.Button(bar, text=t("toolbar.folder"), command=self._open_folder).pack(side="left", padx=6)
-        ttk.Button(bar, text=t("toolbar.categories"), command=self._open_categories).pack(side="left")
+        # Οι ενέργειες σε δική τους γραμμή, ώστε να χωράνε και στο ελάχιστο πλάτος.
+        actions = ttk.Frame(self, padding=(12, 0, 12, 10))
+        actions.pack(fill="x")
+        ttk.Button(actions, text=t("toolbar.import"), command=self._import_files).pack(side="left")
+        ttk.Button(actions, text=t("toolbar.imports"), command=self._open_imports).pack(side="left", padx=6)
+        ttk.Button(actions, text=t("toolbar.reload"), command=self.reload).pack(side="left")
+        ttk.Button(actions, text=t("toolbar.categories"), command=self._open_categories).pack(side="left", padx=6)
 
     def _build_statusbar(self):
         bar = ttk.Frame(self, padding=(12, 0, 12, 10))
@@ -520,7 +613,8 @@ class MyMoneyApp(tk.Tk):
     def reload(self):
         year, month, bank = self._selected_year(), self._selected_month(), self._selected_bank()
         try:
-            self.all_transactions = load_banks(self.files_dir)
+            self.all_transactions = database.load_transactions(self.db_file)
+            self.imports = database.list_imports(self.db_file)
             self.categorizer = Categorizer.from_file(self.categories_file, self.manual_file)
         except Exception as exc:  # εμφάνιση σφάλματος αντί για crash
             messagebox.showerror(t("msg.error"), t("msg.load_failed", error=exc))
@@ -530,9 +624,9 @@ class MyMoneyApp(tk.Tk):
         self.refresh()
 
     def _update_filters(self, year: str | None, month: str | None, bank: str | None):
-        files = sum(len(data_files(f)) for f in bank_folders(self.files_dir))
-        self.status_var.set(t("status", banks=len(self.banks), files=files,
-                              count=len(self.all_transactions)))
+        self.status_var.set(t("status", banks=len(self.banks), files=len(self.imports),
+                              count=len(self.all_transactions))
+                            if self.all_transactions else t("status.empty"))
         years = sorted({tx.year for tx in self.all_transactions}, reverse=True)
         self.year_box["values"] = [t("all_years"), *years]
         self.year_var.set(year if year in years else t("all_years"))
@@ -795,9 +889,42 @@ class MyMoneyApp(tk.Tk):
         self._fill_transactions()
         self.notebook.select(self.tx_tab)
 
-    def _open_folder(self):
-        self.files_dir.mkdir(exist_ok=True)
-        os.startfile(self.files_dir)
+    def _import_files(self):
+        patterns = " ".join(f"*{suffix}" for suffix in SUPPORTED_SUFFIXES)
+        names = filedialog.askopenfilenames(parent=self, title=t("import.title"),
+                                            filetypes=[(t("import.filetype"), patterns)])
+        if not names:
+            return
+        files, errors = [], []
+        for path in map(Path, names):
+            try:
+                files.append((path, detect_bank(path)))
+            except Exception as exc:  # χαλασμένο αρχείο ή άγνωστη μορφή
+                errors.append(f"{path.name}: {exc}")
+        results = []
+        if files:
+            banks = sorted({*known_banks(), *self.banks}, key=bank_label)
+            dialog = ImportDialog(self, files, banks)
+            if dialog.result is None:
+                return
+            for path, bank in dialog.result:
+                try:
+                    r = database.import_file(self.db_file, path, bank)
+                except Exception as exc:
+                    errors.append(f"{path.name}: {exc}")
+                else:
+                    results.append(t("import.result", file=r.file_name, bank=bank_label(r.bank),
+                                     added=r.added, rows=r.rows))
+            self.reload()
+        message = "\n".join([*results, *errors])
+        if errors:
+            messagebox.showwarning(t("import.title"), message)
+        else:
+            messagebox.showinfo(t("import.title"), message)
+
+    def _open_imports(self):
+        if ImportsDialog(self, self.db_file).changed:
+            self.reload()
 
     def _open_categories(self):
         if self.categories_file.exists():
