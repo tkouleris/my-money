@@ -1,0 +1,2 @@
+# Τα scripts του Linux δεν τρέχουν με CRLF, ακόμα κι αν γίνει checkout στα Windows.
+*.sh text eol=lf
