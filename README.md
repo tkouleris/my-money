@@ -13,8 +13,10 @@ Everything runs locally. Your bank data never leaves your computer.
 - Searchable transaction list with a bank and category filter
 - Automatic categorisation by keywords, plus manual categories you set from the app for one or many transactions
 - Categories and keywords are managed from the app
+- Clearer descriptions of your own for any transaction, without losing the bank's original
+- Transactions you add by hand (e.g. cash payments), and deleting transactions, which can be undone for those from bank files
 - Transfers between your own banks are detected and left out of the combined total, so they are not counted twice
-- Bank exports and categories are stored in a local SQLite database, and an import can be undone
+- Bank exports, categories and your changes are stored in a local SQLite database, and an import can be undone
 - Overlapping exports of the same bank are de-duplicated
 - A plain-text report for the terminal
 - Greek (default) and English interface
@@ -62,7 +64,7 @@ Download the transaction exports from each bank's e-banking, wherever you like. 
 
 The transactions are stored in `mymoney.db`, so the app doesn't need the original files afterwards. The app starts empty until you import something.
 
-You can keep importing newer exports. Transactions that appear in more than one file of the same bank are counted only once, and importing the exact same file twice is refused. To undo an import, press **Imports**, select it (the list shows the period each import covers) and press **Delete import**. This removes all of that file's transactions and brings back any it was hiding from another file. Your manual categories are kept, so they apply again if you import the file again.
+You can keep importing newer exports. Transactions that appear in more than one file of the same bank are counted only once, and importing the exact same file twice is refused. To undo an import, press **Imports**, select it (the list shows the period each import covers) and press **Delete import**. This removes all of that file's transactions and brings back any it was hiding from another file. Your manual categories, changed descriptions and deleted transactions are kept, so they apply again if you import the file again.
 
 You can also import from the terminal. The bank is detected from the format unless you pass `--bank`:
 
@@ -116,17 +118,21 @@ Transactions are categorised in this order:
 
 To change the category of transactions, open the **Transactions** tab, select one or more (Ctrl/Shift + click, or Ctrl+A for all that are shown) and press **Change category…**. You can apply the choice to those transactions only, or to all transactions with the same description.
 
-To give transactions a clearer description, select them and press **Change description…** (or F2, or right click). The window always shows the original description from the bank, and **Restore original** (or an empty description) brings it back. The original is never deleted: categories, keywords and duplicate detection keep using it, and the new description is only for display. Changed descriptions are marked with ✎, and the search finds a transaction by either description.
-
-To add a transaction that is not in any bank file (for example a cash payment), press **✚ New transaction…** in the **Transactions** tab. Pick a bank, or type a new name such as "Cash", then fill in the date, description, type and amount. You can also pick a category; if you leave it empty, the keywords decide. Transactions you add are marked with ✚.
-
-To delete transactions, select them and press **Delete…** (or the Delete key). Transactions from bank files are only hidden: they stay hidden if you import the same file again, and **Deleted…** lists them so you can restore them. Transactions you added yourself are deleted permanently.
-
 To manage the categories themselves, press **Categories**. There you can add, rename, delete and reorder them, mark them as income categories and edit their keywords. Order matters, because categories are checked from the top of the list. Spaces in keywords count too, so `POI ` does not match `POINT`. Deleting a category sends its transactions back to their automatic category. "Λοιπά έσοδα" and "Λοιπά έξοδα" are the fallback categories, so they cannot be renamed or deleted.
 
-Everything is stored in `mymoney.db`. A new database starts with a default set of categories (`mymoney/default_categories.py`). If you have a `manual_categories.json` from an older version, its choices are moved into the database once, the next time the app starts. The file is then no longer used, and you can delete it.
+Categories, keywords and manual choices are stored in `mymoney.db`. A new database starts with a default set of categories (`mymoney/default_categories.py`). If you have a `manual_categories.json` from an older version, its choices are moved into the database once, the next time the app starts. The file is then no longer used, and you can delete it.
 
 A positive amount counts as income only if its category is marked as an income category. A positive amount in an expense category is treated as a refund and lowers that category's expenses.
+
+## Editing transactions
+
+Everything here is done in the **Transactions** tab, and your changes are stored in `mymoney.db`.
+
+To give transactions a clearer description, select them and press **Change description…** (or F2, or right click). The window always shows the original description from the bank, and **Restore original** (or an empty description) brings it back. The original is never deleted: categories, keywords and duplicate detection keep using it, and the new description is only for display. Changed descriptions are marked with ✎, and the search finds a transaction by either description.
+
+To add a transaction that is not in any bank file (for example a cash payment), press **✚ New transaction…**. Pick a bank, or type a new name such as "Cash", then fill in the date, description, type and amount. You can also pick a category; if you leave it empty, the keywords decide. Transactions you add are marked with ✚.
+
+To delete transactions, select them and press **Delete…** (or the Delete key). Transactions from bank files are only hidden: they stay hidden if you import the same file again, and **Deleted…** lists them so you can restore them. Transactions you added yourself are deleted permanently.
 
 ## Transfers between banks
 
@@ -144,7 +150,7 @@ When a debit in one bank matches a credit in another bank, the app treats the pa
 ```
 main.py                  entry point (GUI, --import or --report)
 mymoney/loader.py        reading bank exports, de-duplication, inter-bank transfers
-mymoney/database.py      the SQLite database of imported transactions and categories
+mymoney/database.py      the SQLite database of transactions, categories and your changes
 mymoney/categories.py    keyword and manual categorisation
 mymoney/default_categories.py  the categories a new database starts with
 mymoney/stats.py         statistics
@@ -153,7 +159,7 @@ mymoney/i18n.py          Greek/English texts and amount formatting
 mymoney/theme.py         light/dark colours and widget styles
 mymoney/settings.py      reading and writing settings.json
 mymoney/assets/banks/    bank logos for the bank list
-mymoney.db               your imported transactions and categories (not committed)
+mymoney.db               your transactions, categories and changes (not committed)
 settings.json            your language and theme choice (not committed)
 ```
 
