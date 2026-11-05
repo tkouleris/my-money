@@ -5,7 +5,7 @@
 δύο αρχεία της ίδιας τράπεζας αφαιρούνται κατά την ανάγνωση (merge_files), ώστε η
 διαγραφή μιας εισαγωγής να επαναφέρει τις γραμμές που είχε «κρύψει» από άλλο αρχείο.
 
-Οι χειροκίνητες κατηγορίες κρατιούνται με κλειδί το tx_key και όχι ως στήλη των γραμμών,
+Οι χειροκίνητες κατηγορίες και οι περιγραφές που αλλάζει ο χρήστης κρατιούνται με κλειδί το tx_key και όχι ως στήλη των γραμμών,
 ώστε να ισχύουν για τη γραμμή οποιουδήποτε αρχείου και να μη χάνονται με τη διαγραφή
 μιας εισαγωγής.
 """
@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS manual_transactions (
 CREATE TABLE IF NOT EXISTS manual_descriptions (
     description TEXT PRIMARY KEY,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS custom_descriptions (
+    tx_key TEXT PRIMARY KEY,
+    description TEXT NOT NULL
 );
 """
 
@@ -214,6 +218,29 @@ def delete_import(db_path: Path, import_id: int):
     ώστε να ισχύουν και για τις ίδιες κινήσεις άλλων αρχείων ή αν ξαναγίνει η εισαγωγή."""
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM imports WHERE id = ?", (import_id,))
+
+
+# ---------- περιγραφές του χρήστη ----------
+# Η αρχική περιγραφή των γραμμών δεν αλλάζει ποτέ· η νέα αποθηκεύεται χωριστά, με κλειδί
+# το tx_key, και χρησιμοποιείται μόνο για την εμφάνιση. Οι κατηγορίες και το tx_key
+# βασίζονται πάντα στην αρχική.
+
+def load_descriptions(db_path: Path) -> dict[str, str]:
+    """Οι περιγραφές που έχει αλλάξει ο χρήστης: tx_key -> νέα περιγραφή."""
+    with _connect(db_path) as conn:
+        return dict(conn.execute("SELECT tx_key, description FROM custom_descriptions").fetchall())
+
+
+def set_descriptions(db_path: Path, tx_keys: list[str], description: str):
+    with _connect(db_path) as conn:
+        conn.executemany("INSERT OR REPLACE INTO custom_descriptions (tx_key, description) VALUES (?, ?)",
+                         [(key, description) for key in tx_keys])
+
+
+def clear_descriptions(db_path: Path, tx_keys: list[str]):
+    """Επαναφορά στην αρχική περιγραφή του αρχείου της τράπεζας."""
+    with _connect(db_path) as conn:
+        conn.executemany("DELETE FROM custom_descriptions WHERE tx_key = ?", [(key,) for key in tx_keys])
 
 
 # ---------- κατηγορίες ----------

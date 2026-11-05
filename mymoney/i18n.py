@@ -94,9 +94,9 @@ STRINGS = {
     "hint.merchants": ("Διπλό κλικ για να βάλεις όλες τις κινήσεις του εμπόρου σε κατηγορία.",
                        "Double-click to put all of a merchant's transactions in a category."),
     "hint.transactions": ("Ctrl/Shift + κλικ για πολλές κινήσεις · Ctrl+A για όλες · διπλό ή δεξί κλικ · "
-                          "✎ = χειροκίνητη κατηγορία",
+                          "F2 = περιγραφή · ✎ = δική σου αλλαγή",
                           "Ctrl/Shift + click for multiple transactions · Ctrl+A for all · double or right click · "
-                          "✎ = manual category"),
+                          "F2 = description · ✎ = changed by you"),
 
     # Κινήσεις
     "tx.search": ("Αναζήτηση:", "Search:"),
@@ -104,6 +104,13 @@ STRINGS = {
     "tx.summary": ("{count} κινήσεις · σύνολο {total}", "{count} transactions · total {total}"),
     "tx.change_category": ("Αλλαγή κατηγορίας…", "Change category…"),
     "tx.reset_category": ("Επαναφορά αυτόματης κατηγορίας", "Reset to automatic category"),
+    "tx.change_description": ("Αλλαγή περιγραφής…", "Change description…"),
+    "tx.reset_description": ("Επαναφορά αρχικής περιγραφής", "Restore original description"),
+    "desc.title": ("Αλλαγή περιγραφής", "Change description"),
+    "desc.original": ("Αρχική περιγραφή (από την τράπεζα):", "Original description (from the bank):"),
+    "desc.many": ("(διαφορετικές περιγραφές)", "(different descriptions)"),
+    "desc.prompt": ("Νέα περιγραφή (κενό = η αρχική):", "New description (empty = the original):"),
+    "desc.reset": ("Επαναφορά αρχικής", "Restore original"),
 
     # Γραφήματα
     "chart.years": ("Έσοδα και έξοδα ανά έτος", "Income and expenses by year"),

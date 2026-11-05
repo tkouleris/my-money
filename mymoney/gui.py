@@ -15,7 +15,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 from . import database, i18n, theme  # noqa: E402
-from .categories import Categorizer  # noqa: E402
+from .categories import Categorizer, tx_key  # noqa: E402
 from .i18n import bank_key, bank_label, fmt_money, known_banks, month_name, t  # noqa: E402
 from .loader import SUPPORTED_SUFFIXES, detect_bank, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
@@ -202,6 +202,9 @@ class IconDropdown(ttk.Menubutton):
         self.command(value)
 
 
+RESULT_CANCEL = object()  # ο χρήστης έκλεισε το παράθυρο χωρίς αλλαγή
+
+
 class CategoryDialog(tk.Toplevel):
     """Παράθυρο επιλογής κατηγορίας για μία ή περισσότερες κινήσεις."""
 
@@ -257,6 +260,58 @@ class CategoryDialog(tk.Toplevel):
             return
         is_new = name not in self.categories
         self.result = (name, self.whole_var.get(), is_new and self.income_var.get())
+        self.destroy()
+
+
+class DescriptionDialog(tk.Toplevel):
+    """Αλλαγή της περιγραφής μίας ή περισσότερων κινήσεων. Η αρχική περιγραφή φαίνεται
+    πάντα και δεν σβήνεται. result: RESULT_CANCEL, None για επαναφορά ή η νέα περιγραφή."""
+
+    def __init__(self, master, txs, current: str, edited: bool):
+        super().__init__(master)
+        self.title(t("desc.title"))
+        self.transient(master)
+        self.resizable(False, False)
+        self.result: str | None | object = RESULT_CANCEL
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        originals = sorted({tx.description for tx in txs})
+        ttk.Label(body, text=t("desc.original")).pack(anchor="w")
+        original_var = tk.StringVar(value=originals[0] if len(originals) == 1 else t("desc.many"))
+        # Entry μόνο για ανάγνωση, ώστε η αρχική περιγραφή να μπορεί να αντιγραφεί
+        ttk.Entry(body, textvariable=original_var, state="readonly", width=60).pack(fill="x", pady=(2, 10))
+        if len(txs) > 1:
+            ttk.Label(body, text=t("tx.summary", count=len(txs), total=fmt(sum(tx.amount for tx in txs))),
+                      foreground=colors().text_muted).pack(anchor="w", pady=(0, 10))
+
+        ttk.Label(body, text=t("desc.prompt")).pack(anchor="w")
+        self.text_var = tk.StringVar(value=current)
+        entry = ttk.Entry(body, textvariable=self.text_var, width=60)
+        entry.pack(fill="x", pady=(2, 0))
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(14, 0))
+        reset = ttk.Button(buttons, text=t("desc.reset"), command=self._reset)
+        reset.pack(side="left")
+        if not edited:
+            reset.state(["disabled"])
+        ttk.Button(buttons, text=t("dialog.cancel"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("dialog.ok"), command=self._ok).pack(side="right", padx=6)
+        self.bind("<Return>", lambda _: self._ok())
+        self.bind("<Escape>", lambda _: self.destroy())
+
+        run_modal(self)
+
+    def _reset(self):
+        self.result = None
+        self.destroy()
+
+    def _ok(self):
+        # κενό κείμενο σημαίνει επιστροφή στην αρχική περιγραφή
+        self.result = self.text_var.get().strip() or None
         self.destroy()
 
 
@@ -537,6 +592,7 @@ class MyMoneyApp(tk.Tk):
         self.db_file = db_file
         self.settings_file = settings_file
         self.tx_items = {}  # iid του πίνακα κινήσεων -> Transaction
+        self.descriptions: dict[str, str] = {}  # tx_key -> περιγραφή που έδωσε ο χρήστης
         self.geometry("1150x780")
         self.minsize(900, 640)
         theme.apply(self)
@@ -732,14 +788,20 @@ class MyMoneyApp(tk.Tk):
         ttk.Button(actions, text=t("tx.change_category"), command=self._edit_selected).pack(side="left")
         ttk.Button(actions, text=t("tx.reset_category"),
                    command=self._clear_selected).pack(side="left", padx=6)
+        ttk.Button(actions, text=t("tx.change_description"),
+                   command=self._edit_description).pack(side="left")
         ttk.Label(actions, foreground=colors().text_muted, text=t("hint.transactions")).pack(side="left", padx=12)
 
         self.tx_menu = tk.Menu(self, tearoff=False)
         self.tx_menu.add_command(label=t("tx.change_category"), command=self._edit_selected)
         self.tx_menu.add_command(label=t("tx.reset_category"), command=self._clear_selected)
+        self.tx_menu.add_separator()
+        self.tx_menu.add_command(label=t("tx.change_description"), command=self._edit_description)
+        self.tx_menu.add_command(label=t("tx.reset_description"), command=self._reset_description)
         self.tx_tree.bind("<Double-1>", lambda _: self._edit_selected())
         self.tx_tree.bind("<Button-3>", self._on_tx_right_click)
         self.tx_tree.bind("<Control-KeyPress>", self._on_tx_ctrl_key)
+        self.tx_tree.bind("<F2>", lambda _: self._edit_description())
 
     # ---------- γλώσσα και θέμα ----------
 
@@ -820,6 +882,7 @@ class MyMoneyApp(tk.Tk):
             self.all_transactions = database.load_transactions(self.db_file)
             self.imports = database.list_imports(self.db_file)
             self.categorizer = Categorizer.from_db(self.db_file)
+            self.descriptions = database.load_descriptions(self.db_file)
         except Exception as exc:  # εμφάνιση σφάλματος αντί για crash
             messagebox.showerror(t("msg.error"), t("msg.load_failed", error=exc))
             return
@@ -1026,12 +1089,15 @@ class MyMoneyApp(tk.Tk):
             tcat = self.stats.categories[tx]
             if cat != all_categories and tcat != cat:
                 continue
-            if query and query not in tx.description.casefold():
+            custom = self.descriptions.get(tx_key(tx))
+            # η αναζήτηση βρίσκει την κίνηση και με τη νέα και με την αρχική περιγραφή
+            if query and query not in tx.description.casefold() and query not in (custom or "").casefold():
                 continue
             total += tx.amount
             count += 1
             shown_cat = f"✎ {tcat}" if self.categorizer.is_manual(tx) else tcat
-            iid = tree.insert("", "end", values=(f"{tx.date:%d/%m/%Y}", bank_label(tx.bank), tx.description,
+            shown_desc = f"✎ {custom}" if custom is not None else tx.description
+            iid = tree.insert("", "end", values=(f"{tx.date:%d/%m/%Y}", bank_label(tx.bank), shown_desc,
                                                  shown_cat, fmt(tx.amount), fmt(tx.balance)),
                               tags=("income" if tx.is_income else "expense",))
             self.tx_items[iid] = tx
@@ -1081,6 +1147,49 @@ class MyMoneyApp(tk.Tk):
         if txs:
             self.categorizer.clear(txs)
             self.refresh()
+
+    # ---------- περιγραφές ----------
+
+    def _edit_description(self):
+        txs = self._selected_transactions()
+        if not txs:
+            messagebox.showinfo(t("desc.title"), t("msg.select_first"))
+            return
+        keys = [tx_key(tx) for tx in txs]
+        shown = {self.descriptions.get(key, tx.description) for key, tx in zip(keys, txs)}
+        dialog = DescriptionDialog(self, txs, shown.pop() if len(shown) == 1 else "",
+                                   edited=any(key in self.descriptions for key in keys))
+        if dialog.result is RESULT_CANCEL:
+            return
+        if dialog.result is None:
+            self._reset_description()
+            return
+        # όπου η «νέα» περιγραφή είναι ίδια με την αρχική, δεν κρατάμε αλλαγή
+        same = [key for key, tx in zip(keys, txs) if tx.description == dialog.result]
+        changed = [key for key in keys if key not in same]
+        try:
+            database.clear_descriptions(self.db_file, same)
+            database.set_descriptions(self.db_file, changed, dialog.result)
+        except Exception as exc:
+            messagebox.showerror(t("msg.error"), str(exc))
+            return
+        for key in same:
+            self.descriptions.pop(key, None)
+        self.descriptions.update(dict.fromkeys(changed, dialog.result))
+        self._fill_transactions()
+
+    def _reset_description(self):
+        keys = [tx_key(tx) for tx in self._selected_transactions()]
+        if not keys:
+            return
+        try:
+            database.clear_descriptions(self.db_file, keys)
+        except Exception as exc:
+            messagebox.showerror(t("msg.error"), str(exc))
+            return
+        for key in keys:
+            self.descriptions.pop(key, None)
+        self._fill_transactions()
 
     def _on_merchant_edit(self, _event):
         sel = self.merchant_tree.selection()
