@@ -26,6 +26,11 @@ class Transaction:
     balance: Decimal | None
     source: str
     bank: str = ""  # όνομα φακέλου της τράπεζας, π.χ. «eurobank»
+    entry_id: int | None = None  # id στον πίνακα manual_entries, αν την πρόσθεσε ο χρήστης
+
+    @property
+    def is_manual_entry(self) -> bool:
+        return self.entry_id is not None
 
     @property
     def is_income(self) -> bool:

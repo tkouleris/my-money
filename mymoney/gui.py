@@ -3,6 +3,8 @@
 import sys
 import time
 import tkinter as tk
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -17,7 +19,7 @@ from matplotlib.figure import Figure  # noqa: E402
 from . import database, i18n, theme  # noqa: E402
 from .categories import Categorizer, tx_key  # noqa: E402
 from .i18n import bank_key, bank_label, fmt_money, known_banks, month_name, t  # noqa: E402
-from .loader import SUPPORTED_SUFFIXES, detect_bank, split_transfers  # noqa: E402
+from .loader import SUPPORTED_SUFFIXES, detect_bank, parse_amount, parse_date, split_transfers  # noqa: E402
 from .stats import Stats, compute, fmt  # noqa: E402
 from .theme import palette as colors  # noqa: E402
 
@@ -313,6 +315,139 @@ class DescriptionDialog(tk.Toplevel):
         # κενό κείμενο σημαίνει επιστροφή στην αρχική περιγραφή
         self.result = self.text_var.get().strip() or None
         self.destroy()
+
+
+def parse_user_amount(text: str) -> Decimal:
+    """Ποσό που γράφει ο χρήστης: «1.234,50» (ελληνικά), «12,5» ή «12.50»."""
+    text = text.strip().replace(" ", "").replace("€", "")
+    value = parse_amount(text) if "," in text else Decimal(text)
+    if not value.is_finite():
+        raise InvalidOperation(text)
+    return value.quantize(Decimal("0.01"))
+
+
+class EntryDialog(tk.Toplevel):
+    """Νέα κίνηση που δεν υπάρχει σε αρχείο της τράπεζας (π.χ. πληρωμή με μετρητά).
+    result = (τράπεζα, ημερομηνία, περιγραφή, ποσό με πρόσημο, κατηγορία ή "", νέα κατηγορία εσόδων)."""
+
+    def __init__(self, master, banks, bank, categories):
+        super().__init__(master)
+        self.title(t("entry.title"))
+        self.transient(master)
+        self.resizable(False, False)
+        self.result = None
+        self.banks = banks
+        self.categories = categories
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        def row(index, label, widget):
+            ttk.Label(body, text=t(label)).grid(row=index, column=0, sticky="w", pady=3, padx=(0, 12))
+            widget.grid(row=index, column=1, sticky="ew", pady=3)
+
+        self.bank_var = tk.StringVar(value=bank_label(bank) if bank else "")
+        row(0, "entry.bank", ttk.Combobox(body, textvariable=self.bank_var,
+                                          values=[bank_label(b) for b in banks], width=36))
+        self.date_var = tk.StringVar(value=f"{date.today():%d/%m/%Y}")
+        row(1, "entry.date", ttk.Entry(body, textvariable=self.date_var, width=14))
+        self.description_var = tk.StringVar()
+        description = ttk.Entry(body, textvariable=self.description_var, width=38)
+        row(2, "entry.description", description)
+
+        self.kind_var = tk.StringVar(value="expense")
+        kinds = ttk.Frame(body)
+        ttk.Radiobutton(kinds, text=t("entry.expense"), value="expense", variable=self.kind_var).pack(side="left")
+        ttk.Radiobutton(kinds, text=t("entry.income"), value="income",
+                        variable=self.kind_var).pack(side="left", padx=(12, 0))
+        row(3, "entry.kind", kinds)
+        self.amount_var = tk.StringVar()
+        row(4, "entry.amount", ttk.Entry(body, textvariable=self.amount_var, width=14))
+        self.category_var = tk.StringVar()
+        row(5, "entry.category", ttk.Combobox(body, textvariable=self.category_var, values=categories, width=36))
+        ttk.Label(body, text=t("entry.category_hint"), foreground=colors().text_muted).grid(
+            row=6, column=1, sticky="w")
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        ttk.Button(buttons, text=t("dialog.cancel"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("entry.ok"), command=self._ok).pack(side="right", padx=6)
+        self.bind("<Return>", lambda _: self._ok())
+        self.bind("<Escape>", lambda _: self.destroy())
+        description.focus_set()
+
+        run_modal(self)
+
+    def _error(self, key):
+        messagebox.showerror(t("entry.title"), t(key), parent=self)
+
+    def _ok(self):
+        bank = bank_key(self.bank_var.get(), self.banks)
+        if not bank:
+            return self._error("entry.bank_empty")
+        try:
+            tx_date = parse_date(self.date_var.get())
+        except ValueError:
+            return self._error("entry.date_invalid")
+        description = " ".join(self.description_var.get().split())
+        if not description:
+            return self._error("entry.description_empty")
+        try:
+            amount = abs(parse_user_amount(self.amount_var.get()))
+        except (InvalidOperation, ValueError):
+            return self._error("entry.amount_invalid")
+        if not amount:
+            return self._error("entry.amount_zero")
+        income = self.kind_var.get() == "income"
+        category = self.category_var.get().strip()
+        new_income = income and bool(category) and category not in self.categories
+        self.result = (bank, tx_date, description, amount if income else -amount, category, new_income)
+        self.destroy()
+
+
+class DeletedDialog(tk.Toplevel):
+    """Οι κινήσεις αρχείων που έχει διαγράψει ο χρήστης, με δυνατότητα επαναφοράς."""
+
+    def __init__(self, master, db_file: Path):
+        super().__init__(master)
+        self.title(t("deleted.title"))
+        self.transient(master)
+        self.geometry("880x360")
+        self.db_file = db_file
+        self.changed = False
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        buttons = ttk.Frame(body)
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
+        ttk.Button(buttons, text=t("imports.close"), command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text=t("deleted.restore"), command=self._restore).pack(side="left")
+        ttk.Label(buttons, text=t("deleted.hint"), foreground=colors().text_muted).pack(side="left", padx=12)
+        frame, self.tree = make_tree(
+            body, ["col.date", "col.bank", "col.description", "col.amount", "col.deleted_at"],
+            [100, 130, 330, 110, 130], anchors={3: "e"},
+        )
+        frame.pack(fill="both", expand=True)
+        self.bind("<Escape>", lambda _: self.destroy())
+        self._fill()
+
+        run_modal(self)
+
+    def _fill(self):
+        self.tree.delete(*self.tree.get_children())
+        for record in database.list_deleted(self.db_file):
+            self.tree.insert("", "end", iid=str(record.id), values=(
+                f"{record.date:%d/%m/%Y}", bank_label(record.bank), record.description,
+                fmt(record.amount), f"{record.deleted_at:%d/%m/%Y %H:%M}"))
+
+    def _restore(self):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        database.restore_deleted(self.db_file, [int(iid) for iid in selection])
+        self.changed = True
+        self._fill()
 
 
 class ImportDialog(tk.Toplevel):
@@ -790,7 +925,11 @@ class MyMoneyApp(tk.Tk):
                    command=self._clear_selected).pack(side="left", padx=6)
         ttk.Button(actions, text=t("tx.change_description"),
                    command=self._edit_description).pack(side="left")
-        ttk.Label(actions, foreground=colors().text_muted, text=t("hint.transactions")).pack(side="left", padx=12)
+        ttk.Button(actions, text=t("tx.add"), command=self._add_entry).pack(side="left", padx=(18, 0))
+        ttk.Button(actions, text=t("tx.delete"), command=self._delete_selected).pack(side="left", padx=6)
+        ttk.Button(actions, text=t("tx.deleted"), command=self._open_deleted).pack(side="left")
+        # σε δική της γραμμή, γιατί δίπλα στα κουμπιά δεν χωράει
+        ttk.Label(tab, foreground=colors().text_muted, text=t("hint.transactions")).pack(anchor="w", pady=(4, 0))
 
         self.tx_menu = tk.Menu(self, tearoff=False)
         self.tx_menu.add_command(label=t("tx.change_category"), command=self._edit_selected)
@@ -798,10 +937,14 @@ class MyMoneyApp(tk.Tk):
         self.tx_menu.add_separator()
         self.tx_menu.add_command(label=t("tx.change_description"), command=self._edit_description)
         self.tx_menu.add_command(label=t("tx.reset_description"), command=self._reset_description)
+        self.tx_menu.add_separator()
+        self.tx_menu.add_command(label=t("tx.add"), command=self._add_entry)
+        self.tx_menu.add_command(label=t("tx.delete"), command=self._delete_selected)
         self.tx_tree.bind("<Double-1>", lambda _: self._edit_selected())
         self.tx_tree.bind("<Button-3>", self._on_tx_right_click)
         self.tx_tree.bind("<Control-KeyPress>", self._on_tx_ctrl_key)
         self.tx_tree.bind("<F2>", lambda _: self._edit_description())
+        self.tx_tree.bind("<Delete>", lambda _: self._delete_selected())
 
     # ---------- γλώσσα και θέμα ----------
 
@@ -1097,7 +1240,8 @@ class MyMoneyApp(tk.Tk):
             count += 1
             shown_cat = f"✎ {tcat}" if self.categorizer.is_manual(tx) else tcat
             shown_desc = f"✎ {custom}" if custom is not None else tx.description
-            iid = tree.insert("", "end", values=(f"{tx.date:%d/%m/%Y}", bank_label(tx.bank), shown_desc,
+            shown_bank = f"✚ {bank_label(tx.bank)}" if tx.is_manual_entry else bank_label(tx.bank)
+            iid = tree.insert("", "end", values=(f"{tx.date:%d/%m/%Y}", shown_bank, shown_desc,
                                                  shown_cat, fmt(tx.amount), fmt(tx.balance)),
                               tags=("income" if tx.is_income else "expense",))
             self.tx_items[iid] = tx
@@ -1190,6 +1334,42 @@ class MyMoneyApp(tk.Tk):
         for key in keys:
             self.descriptions.pop(key, None)
         self._fill_transactions()
+
+    # ---------- νέες και διαγραμμένες κινήσεις ----------
+
+    def _add_entry(self):
+        dialog = EntryDialog(self, self.banks, self._selected_bank(), self.categorizer.all_categories())
+        if dialog.result is None:
+            return
+        bank, tx_date, description, amount, category, new_income = dialog.result
+        try:
+            tx = database.add_entry(self.db_file, bank, tx_date, description, amount)
+            if category:
+                self.categorizer.assign([tx], category, whole_description=False, income=new_income)
+        except Exception as exc:
+            messagebox.showerror(t("msg.error"), str(exc))
+        self.reload()
+
+    def _delete_selected(self):
+        txs = self._selected_transactions()
+        if not txs:
+            messagebox.showinfo(t("tx.delete_title"), t("msg.select_first"))
+            return
+        total = fmt(sum(tx.amount for tx in txs))
+        text = t("tx.delete_confirm", count=len(txs), total=total)
+        if any(tx.is_manual_entry for tx in txs):
+            text += "\n\n" + t("tx.delete_manual_note")
+        if not messagebox.askyesno(t("tx.delete_title"), text, icon="warning"):
+            return
+        try:
+            database.delete_transactions(self.db_file, txs)
+        except Exception as exc:
+            messagebox.showerror(t("msg.error"), str(exc))
+        self.reload()
+
+    def _open_deleted(self):
+        if DeletedDialog(self, self.db_file).changed:
+            self.reload()
 
     def _on_merchant_edit(self, _event):
         sel = self.merchant_tree.selection()

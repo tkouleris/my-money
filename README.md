@@ -118,6 +118,10 @@ To change the category of transactions, open the **Transactions** tab, select on
 
 To give transactions a clearer description, select them and press **Change description…** (or F2, or right click). The window always shows the original description from the bank, and **Restore original** (or an empty description) brings it back. The original is never deleted: categories, keywords and duplicate detection keep using it, and the new description is only for display. Changed descriptions are marked with ✎, and the search finds a transaction by either description.
 
+To add a transaction that is not in any bank file (for example a cash payment), press **✚ New transaction…** in the **Transactions** tab. Pick a bank, or type a new name such as "Cash", then fill in the date, description, type and amount. You can also pick a category; if you leave it empty, the keywords decide. Transactions you add are marked with ✚.
+
+To delete transactions, select them and press **Delete…** (or the Delete key). Transactions from bank files are only hidden: they stay hidden if you import the same file again, and **Deleted…** lists them so you can restore them. Transactions you added yourself are deleted permanently.
+
 To manage the categories themselves, press **Categories**. There you can add, rename, delete and reorder them, mark them as income categories and edit their keywords. Order matters, because categories are checked from the top of the list. Spaces in keywords count too, so `POI ` does not match `POINT`. Deleting a category sends its transactions back to their automatic category. "Λοιπά έσοδα" and "Λοιπά έξοδα" are the fallback categories, so they cannot be renamed or deleted.
 
 Everything is stored in `mymoney.db`. A new database starts with a default set of categories (`mymoney/default_categories.py`). If you have a `manual_categories.json` from an older version, its choices are moved into the database once, the next time the app starts. The file is then no longer used, and you can delete it.

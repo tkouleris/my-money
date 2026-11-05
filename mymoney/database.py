@@ -5,6 +5,11 @@
 δύο αρχεία της ίδιας τράπεζας αφαιρούνται κατά την ανάγνωση (merge_files), ώστε η
 διαγραφή μιας εισαγωγής να επαναφέρει τις γραμμές που είχε «κρύψει» από άλλο αρχείο.
 
+Ο χρήστης μπορεί να προσθέσει δικές του κινήσεις (manual_entries) και να διαγράψει
+οποιαδήποτε κίνηση. Οι κινήσεις των αρχείων δεν σβήνονται από τη βάση: γράφονται στο
+deleted_transactions και κρύβονται κατά την ανάγνωση, ώστε να μην ξαναεμφανιστούν με
+νέα εισαγωγή του ίδιου αρχείου και να μπορούν να επανέλθουν.
+
 Οι χειροκίνητες κατηγορίες και οι περιγραφές που αλλάζει ο χρήστης κρατιούνται με κλειδί το tx_key και όχι ως στήλη των γραμμών,
 ώστε να ισχύουν για τη γραμμή οποιουδήποτε αρχείου και να μη χάνονται με τη διαγραφή
 μιας εισαγωγής.
@@ -13,7 +18,7 @@
 import hashlib
 import json
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -72,6 +77,27 @@ CREATE TABLE IF NOT EXISTS custom_descriptions (
     tx_key TEXT PRIMARY KEY,
     description TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS manual_entries (
+    id INTEGER PRIMARY KEY,
+    bank TEXT NOT NULL,
+    date TEXT NOT NULL,
+    value_date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+-- Μία γραμμή για κάθε διαγραμμένη εμφάνιση: δύο ίδιες κινήσεις (π.χ. δύο καφέδες την
+-- ίδια μέρα) έχουν το ίδιο tx_key, οπότε η διαγραφή της μίας κρύβει μόνο μία.
+CREATE TABLE IF NOT EXISTS deleted_transactions (
+    id INTEGER PRIMARY KEY,
+    bank TEXT NOT NULL,
+    tx_key TEXT NOT NULL,
+    date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    deleted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deleted_transactions_key ON deleted_transactions(bank, tx_key);
 """
 
 
@@ -92,6 +118,16 @@ class ImportResult:
     bank: str
     rows: int  # γραμμές του αρχείου
     added: int  # νέες κινήσεις, χωρίς όσες υπήρχαν ήδη σε άλλο αρχείο της τράπεζας
+
+
+@dataclass(frozen=True)
+class DeletedRecord:
+    id: int
+    bank: str
+    date: date
+    description: str
+    amount: Decimal
+    deleted_at: datetime
 
 
 @dataclass(frozen=True)
@@ -164,11 +200,90 @@ def load_transactions(db_path: Path) -> list[Transaction]:
             bank=bank,
         ))
 
+    with _connect(db_path) as conn:
+        entries = conn.execute(
+            "SELECT id, bank, date, value_date, description, amount FROM manual_entries ORDER BY id"
+        ).fetchall()
+        hidden = Counter(conn.execute("SELECT bank, tx_key FROM deleted_transactions").fetchall())
+
     result = []
     for bank in sorted(banks):
-        result.extend(merge_files(list(banks[bank].values())))
+        for tx in merge_files(list(banks[bank].values())):
+            key = (tx.bank, tx_key(tx))
+            if hidden[key]:
+                hidden[key] -= 1
+                continue
+            result.append(tx)
+    # οι κινήσεις του χρήστη δεν περνούν από το merge_files: δεν είναι διπλότυπα κάποιου αρχείου
+    result.extend(Transaction(
+        date=date.fromisoformat(tx_date),
+        value_date=date.fromisoformat(value_date),
+        description=description,
+        amount=Decimal(amount),
+        balance=None,
+        source="",
+        bank=bank,
+        entry_id=entry_id,
+    ) for entry_id, bank, tx_date, value_date, description, amount in entries)
     result.sort(key=lambda tx: tx.date)
     return result
+
+
+def tx_key(tx: Transaction) -> str:
+    """Σταθερό αναγνωριστικό κίνησης για αποθήκευση των επιλογών του χρήστη."""
+    return f"{tx.date:%Y-%m-%d}|{tx.value_date:%Y-%m-%d}|{tx.description}|{tx.amount}"
+
+
+# ---------- κινήσεις του χρήστη και διαγραφές ----------
+
+def add_entry(db_path: Path, bank: str, tx_date: date, description: str, amount: Decimal) -> Transaction:
+    """Προσθέτει κίνηση που δεν υπάρχει σε αρχείο (π.χ. πληρωμή με μετρητά)."""
+    if not bank:
+        raise ValueError(t("entry.bank_empty"))
+    if not description:
+        raise ValueError(t("entry.description_empty"))
+    if not amount:
+        raise ValueError(t("entry.amount_zero"))
+    with _connect(db_path) as conn:
+        entry_id = conn.execute(
+            "INSERT INTO manual_entries (bank, date, value_date, description, amount, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (bank, tx_date.isoformat(), tx_date.isoformat(), description, str(amount),
+             datetime.now().isoformat(" ", "seconds")),
+        ).lastrowid
+    return Transaction(tx_date, tx_date, description, amount, None, "", bank, entry_id)
+
+
+def delete_transactions(db_path: Path, txs: list[Transaction]):
+    """Οι κινήσεις του χρήστη σβήνονται οριστικά· των αρχείων κρύβονται, ώστε να
+    μπορούν να επανέλθουν με restore_deleted."""
+    now = datetime.now().isoformat(" ", "seconds")
+    with _connect(db_path) as conn:
+        conn.executemany("DELETE FROM manual_entries WHERE id = ?",
+                         [(tx.entry_id,) for tx in txs if tx.is_manual_entry])
+        conn.executemany(
+            "INSERT INTO deleted_transactions (bank, tx_key, date, description, amount, deleted_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(tx.bank, tx_key(tx), tx.date.isoformat(), tx.description, str(tx.amount), now)
+             for tx in txs if not tx.is_manual_entry],
+        )
+
+
+def list_deleted(db_path: Path) -> list[DeletedRecord]:
+    """Οι κινήσεις αρχείων που έχει διαγράψει ο χρήστης, οι πιο πρόσφατες διαγραφές πρώτες."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, bank, date, description, amount, deleted_at FROM deleted_transactions "
+            "ORDER BY deleted_at DESC, id DESC"
+        ).fetchall()
+    return [DeletedRecord(id_, bank, date.fromisoformat(tx_date), description, Decimal(amount),
+                          datetime.fromisoformat(at))
+            for id_, bank, tx_date, description, amount, at in rows]
+
+
+def restore_deleted(db_path: Path, ids: list[int]):
+    with _connect(db_path) as conn:
+        conn.executemany("DELETE FROM deleted_transactions WHERE id = ?", [(id_,) for id_ in ids])
 
 
 def import_file(db_path: Path, path: Path, bank: str) -> ImportResult:

@@ -12,12 +12,8 @@ from pathlib import Path
 
 from . import database
 from .default_categories import EXPENSE_OTHER, INCOME_OTHER
+from .database import tx_key  # noqa: F401  (το χρησιμοποιούν και άλλα modules από εδώ)
 from .loader import Transaction
-
-
-def tx_key(tx: Transaction) -> str:
-    """Σταθερό αναγνωριστικό κίνησης για αποθήκευση χειροκίνητων επιλογών."""
-    return f"{tx.date:%Y-%m-%d}|{tx.value_date:%Y-%m-%d}|{tx.description}|{tx.amount}"
 
 
 class Categorizer:
